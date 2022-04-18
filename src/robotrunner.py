@@ -4,13 +4,17 @@ Copyright (C) 2020-2022 Benjamin Bokser
 import plots
 import mpc_cvx
 
-# import time
-# import sys
 import numpy as np
 import copy
 from scipy.linalg import expm
 import itertools
 np.set_printoptions(suppress=True, linewidth=np.nan)
+
+H = np.zeros((4, 3))
+H[1:4, 0:4] = np.eye(3)
+
+T = np.zeros((4, 4))
+np.fill_diagonal(T, [1.0, -1.0, -1.0, -1.0])
 
 
 def projection(p0, v):
@@ -23,14 +27,75 @@ def projection(p0, v):
     return p
 
 
+def hat(w):
+    # skew-symmetric
+    return np.array([[0, - w[2], w[1]],
+                     [w[2], 0, - w[0]],
+                     [-w[1], w[0], 0]])
+
+
+def L(Q):
+    LQ = np.zeros((4, 4))
+    LQ[0, 0] = Q[0]
+    LQ[0, 1:4] = - np.transpose(Q[1:4])
+    LQ[1:4, 0] = Q[1:4]
+    LQ[1:4, 1:4] = Q[0] * np.eye(3) + hat(Q[1:4])
+    return LQ
+
+
+def R(Q):
+    RQ = np.zeros((4, 4))
+    RQ[0, 0] = Q[0]
+    RQ[0, 1:4] = - np.transpose(Q[1:4])
+    RQ[1:4, 0] = Q[1:4]
+    RQ[1:4, 1:4] = Q[0] * np.eye(3) - hat(Q[1:4])
+    return RQ
+
+
+def rz_phi(Q_in):
+    # linearized rotation matrix Rz(phi) using commanded yaw
+    # phi_s = 2 * np.arcsin(Q_in[3])
+    phi = quat2euler(Q_in)[2]  # extract z-axis euler angle
+    Rz = np.array([[np.cos(phi), np.sin(phi),  0.0],
+                   [-np.sin(phi), np.cos(phi), 0.0],
+                   [0.0,         0.0,          1.0]])
+    return Rz
+
+
+def quat2euler(quat):
+    w, x, y, z = quat
+    y_sqr = y * y
+
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + y_sqr)
+    X = np.arctan2(t0, t1)
+
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    Y = np.arcsin(t2)
+
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (y_sqr + z * z)
+    Z = np.arctan2(t3, t4)
+
+    result = np.zeros(3)
+    result[0] = X
+    result[1] = Y
+    result[2] = Z
+
+    return result
+
+
 class Runner:
-    def __init__(self, dims=2, ctrl='mpc', dt=1e-3):
-        self.dims = dims
+    def __init__(self, ctrl='mpc', dt=1e-3):
         self.ctrl = ctrl
         self.dt = dt
         self.total_run = 5000
         self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
+        self.J = []  # TODO: Fill in
+        self.r = []
         self.N = 10  # mpc horizon length
         self.g = 9.81  # gravitational acceleration, m/s2
         self.t_p = 1  # gait period, seconds
@@ -38,46 +103,22 @@ class Runner:
         # for now, mpc sampling time is equal to gait period
         self.mpc_dt = self.t_p * self.phi_switch  # mpc sampling time
         self.N_time = self.N*self.mpc_dt  # mpc horizon time
-        if dims == 2:
-            self.n_x = 5  # number of states
-            self.n_u = 2  # number of controls
-            self.A = np.array([[0, 0, 1, 0, 0],
-                               [0, 0, 0, 1, 0],
-                               [0, 0, 0, 0, 0],
-                               [0, 0, 0, 0, -1],
-                               [0, 0, 0, 0, 0]])
-            self.B = np.array([[0, 0],
-                               [0, 0],
-                               [1 / self.m, 0],
-                               [0, 1 / self.m],
-                               [0, 0]])
-            self.X_0 = np.zeros(self.n_x)
-            self.X_0[1] = 0.7
-            self.X_0[-1] = self.g  # initial conditions
-            self.X_f = np.array([2, 0.5, 0, 0, self.g])
+        n_x = 13  # number of states
+        n_u = 6  # number of controls
 
-        elif dims == 3:
-            self.n_x = 7  # number of states
-            self.n_u = 3  # number of controls
-            self.A = np.array([[0, 0, 0, 1, 0, 0, 0],
-                               [0, 0, 0, 0, 1, 0, 0],
-                               [0, 0, 0, 0, 0, 1, 0],
-                               [0, 0, 0, 0, 0, 0, 0],
-                               [0, 0, 0, 0, 0, 0, 0],
-                               [0, 0, 0, 0, 0, 0, -1],
-                               [0, 0, 0, 0, 0, 0, 0]])
-            self.B = np.array([[0, 0, 0],
-                               [0, 0, 0],
-                               [0, 0, 0],
-                               [1 / self.m, 0, 0],
-                               [0, 1 / self.m, 0],
-                               [0, 0, 1 / self.m],
-                               [0, 0, 0]])
+        self.X_0 = np.array([0, 0, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, self.g])
+        self.X_f = np.hstack([2, 2, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, self.g]).T  # desired final state
 
-            self.X_0 = np.zeros(self.n_x)
-            self.X_0[2] = 0.7
-            self.X_0[-1] = self.g  # initial conditions
-            self.X_f = np.hstack([2, 2, 0.5, 0, 0, 0, self.g]).T  # desired final state
+        self.A = np.zeros((n_x, n_x))
+        self.A[0:3, 6:9] = np.eye(3)
+        self.A[3:6, 9:13] = rz_phi(self.X_0[3:7])
+        self.A[8, :-1] = -1
+
+        self.B = np.zeros((n_x, n_u))
+        self.B[6:9, 0:3] = np.eye(3)*1/self.m
+        J_w_inv = rz_phi(self.X_0[3:7]) @ np.linalg.inv(self.J) @ rz_phi(self.X_0[3:7]).T
+        self.B[9:12, 0:3] = J_w_inv @ hat(self.r)
+        self.B[9:12, 6:9] = J_w_inv
 
         mu = 0.3  # coeff of friction
         self.mpc = mpc_cvx.Mpc(t=self.mpc_dt, A=self.A, B=self.B, N=self.N, m=self.m, g=self.g, mu=mu)
@@ -137,35 +178,40 @@ class Runner:
 
         # print(X_traj[-1, :])
         # print(f_hist[4500, :])
-        plots.fplot(total, p_hist=X_traj[:, 0:self.n_u], f_hist=f_hist, s_hist=s_hist, dims=self.dims)
-        plots.posplot(p_ref=self.X_f[0:self.n_u], p_hist=X_traj[:, 0:self.n_u], dims=self.dims)
+        plots.fplot(total, p_hist=X_traj[:, 0:self.n_u], f_hist=f_hist, s_hist=s_hist)
+        plots.posplot(p_ref=self.X_f[0:self.n_u], p_hist=X_traj[:, 0:self.n_u])
         plots.posfplot(p_ref=self.X_f[0:self.n_u], p_hist=X_traj[:, 0:self.n_u],
-                       p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref, dims=self.dims)
+                       p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         # plots.posplot(p_ref=self.X_f[0:self.n_u], p_hist=X_pred_hist[:, 0:self.n_u, 1], dims=self.dims)
         # plots.posplot_t(p_ref=self.X_ref[0:self.n_u], p_hist=X_traj[:, 0:2], total=total)
 
         return None
 
     def dynamics_ct(self, X, U):
-        # CT dynamics X -> dX
-        A = self.A
-        B = self.B
-        X_next = A @ X + B @ U
-        return X_next
+        # SE(3) nonlinear dynamics
+        # Unpack state vector
+        m = self.m
+        g = self.g
+        J = self.J
+        p = X[0:3]  # W frame
+        q = X[3:7]  # B to N
+        v = X[7:10]  # B frame
+        w = X[10:13]  # B frame
+        F = U[0:3]  # W frame
+        tau = U[3:]  # W frame
+        Q = L(q) @ R(q).T
+        dp = H.T @ Q @ H @ v  # rotate v from body to world frame
+        dq = 0.5 * L(q) * H * w
+        Fgn = np.array([0, 0, -g]) * m  # Gravitational force in world frame
+        Fgb = H.T @ Q.T @ H @ Fgn  # rotate Fgn from world frame to body frame
+        Ft = F + Fgb  # total force
+        dv = 1 / m * Ft - np.cross(w, v)
+        dw = np.linalg.solve(J, tau - np.cross(w, J * w))
+        dx = np.vstack(dp, dq, dv, dw)
 
-    def dynamics_dt(self, X, U, t):
-        n_x = self.n_x  # number of states
-        n_u = self.n_u  # number of controls
-        A = self.A
-        B = self.B
-        AB = np.vstack((np.hstack((A, B)), np.zeros((n_u, n_x + n_u))))
-        M = expm(AB * t)
-        Ad = M[0:n_x, 0:n_x]
-        Bd = M[0:n_x, n_x:n_x + n_u]
-        X_next = Ad @ X + Bd @ U
-        return X_next
+        return dx
 
-    def rk4(self, xk, uk):
+    def rk4_normalized(self, xk, uk):
         # RK4 integrator solves for new X
         dynamics = self.dynamics_ct
         h = self.dt
@@ -173,7 +219,9 @@ class Runner:
         f2 = dynamics(xk + 0.5 * h * f1, uk)
         f3 = dynamics(xk + 0.5 * h * f2, uk)
         f4 = dynamics(xk + h * f3, uk)
-        return xk + (h / 6.0) * (f1 + 2 * f2 + 2 * f3 + f4)
+        xn = xk + (h / 6.0) * (f1 + 2 * f2 + 2 * f3 + f4)
+        xn[4:7] = xn[3:7] / np.linalg.norm(xn[3:7])  # normalize the quaternion term
+        return xn
 
     def gait_scheduler(self, t, t0):
         phi = np.mod((t - t0) / self.t_p, 1)
@@ -187,21 +235,12 @@ class Runner:
         # Path planner--generate reference trajectory
         dt = self.dt
         size_mpc = int(self.mpc_factor*self.N)  # length of MPC horizon in s TODO: Perhaps N should vary wrt time?
-        t_ref = 0  # timesteps given to get to target, either mpc length or based on distance (whichever is smaller)
-        X_ref = None
-        if self.dims == 2:
-            t_ref = int(np.minimum(size_mpc, abs(self.X_f[0] - X_in[0])*1000))  # ignore z distance due to bouncing
-            X_ref = np.linspace(start=X_in, stop=self.X_f, num=t_ref)  # interpolate positions
-            # interpolate velocities
-            X_ref[:-1, 2] = [(X_ref[i + 1, 0] - X_ref[i, 0]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
-            X_ref[:-1, 3] = [(X_ref[i + 1, 1] - X_ref[i, 1]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
-        elif self.dims == 3:
-            t_ref = int(np.minimum(size_mpc, np.linalg.norm(self.X_f[0:2] - X_in[0:2]) * 1000))
-            X_ref = np.linspace(start=X_in, stop=self.X_f, num=t_ref)  # interpolate positions
-            # interpolate velocities
-            X_ref[:-1, 3] = [(X_ref[i + 1, 0] - X_ref[i, 0]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
-            X_ref[:-1, 4] = [(X_ref[i + 1, 1] - X_ref[i, 1]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
-            X_ref[:-1, 5] = [(X_ref[i + 1, 2] - X_ref[i, 2]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
+        t_ref = int(np.minimum(size_mpc, np.linalg.norm(self.X_f[0:2] - X_in[0:2]) * 1000))
+        X_ref = np.linspace(start=X_in, stop=self.X_f, num=t_ref)  # interpolate positions
+        # interpolate velocities
+        X_ref[:-1, 3] = [(X_ref[i + 1, 0] - X_ref[i, 0]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
+        X_ref[:-1, 4] = [(X_ref[i + 1, 1] - X_ref[i, 1]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
+        X_ref[:-1, 5] = [(X_ref[i + 1, 2] - X_ref[i, 2]) / dt for i in range(0, np.shape(X_ref)[0] - 1)]
 
         if (size_mpc - t_ref) == 0:
             pass
@@ -211,4 +250,6 @@ class Runner:
             X_ref = np.vstack((X_ref, list(itertools.repeat(self.X_f, int(size_mpc - t_ref)))))
 
         return X_ref
+
+
 
