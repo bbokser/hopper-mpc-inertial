@@ -50,16 +50,6 @@ def rz(phi):
     return Rz
 
 
-def rz_phi(Q_in):
-    # linearized rotation matrix Rz(phi) using commanded yaw
-    # phi_s = 2 * np.arcsin(Q_in[3])
-    phi = quat2euler(Q_in)[2]  # extract z-axis euler angle
-    Rz = np.array([[np.cos(phi), np.sin(phi), 0.0],
-                   [-np.sin(phi), np.cos(phi), 0.0],
-                   [0.0, 0.0, 1.0]])
-    return Rz
-
-
 def quat2euler(quat):
     w, x, y, z = quat
     y_sqr = y * y
@@ -87,11 +77,11 @@ def quat2euler(quat):
 
 def convert(X_in):
     # convert from simulator states to mpc states (SE3 to euler)
-    X0 = np.zeros((12, 1))
+    X0 = np.zeros(12)
     X0[0:3] = X_in[0:3]
     q = X_in[3:7]
     X0[3:6] = quat2euler(q)  # q -> euler
     Q = L(q) @ R(q).T
     X0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
-    X0[9:] = X_in[10:12]  # both w in body frame, yay!
+    X0[9:] = X_in[10:13]  # both w in body frame, yay!
     return X0

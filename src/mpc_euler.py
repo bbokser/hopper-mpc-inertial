@@ -4,22 +4,37 @@ Copyright (C) 2021-2022 Benjamin Bokser
 
 import numpy as np
 import cvxpy as cp
-from scipy.linalg import expm
-from utils import rz
+from utils import rz, quat2euler
 
 
 class Mpc:
 
-    def __init__(self, t, N, A, B, J, rhat, m, g, mu, **kwargs):
+    def __init__(self, X_0, t, N, J, rhat, m, g, mu, **kwargs):
+        n_x = 12  # number of states
+        n_u = 6  # number of controls
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
-        self.A = A
-        self.B = B
         self.J = J
         self.rhat = rhat
         self.m = m  # kg
         self.g = g
-        self.mu = mu  # coefficient of friction
+        self.mu = mu
+        phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
+        A = np.zeros((n_x, n_x))
+        A[0:3, 6:9] = np.eye(3)
+        A[3:6, 9:13] = rz(phi)
+        B = np.zeros((n_x, n_u))
+        B[6:9, 0:3] = np.eye(3) / self.m
+        J_w_inv = rz(phi) @ np.linalg.inv(self.J) @ rz(phi).T
+        B[9:12, 0:3] = J_w_inv @ rhat
+        B[9:12, 3:6] = J_w_inv
+        G = np.zeros(n_x)
+        G[8] = -self.g
+        self.A = A
+        self.B = B
+        self.G = G
+        self.n_x = n_x
+        self.n_u = n_u
 
     def mpcontrol(self, x_in, x_ref, C):
         N = self.N
@@ -29,13 +44,14 @@ class Mpc:
         mu = self.mu
         A = self.A
         B = self.B
+        G = self.G
         J = self.J
         rhat = self.rhat
-        n_x = np.shape(self.A)[1]
-        n_u = np.shape(self.B)[1]
-        x = cp.Variable((N+1, n_x-1))  # don't include gravity
+        n_x = self.n_x
+        n_u = self.n_u
+        x = cp.Variable((N+1, n_x))
         u = cp.Variable((N, n_u))
-        Q = np.eye(n_x-1)
+        Q = np.eye(n_x)
         R = np.eye(n_u)
         cost = 0
         constr = []
@@ -52,29 +68,34 @@ class Mpc:
             fy = u[k, 1]
             fz = u[k, 2]
 
-            # A[0:3, 6:9] = np.eye(3)  # unnecessary; should already be this
-            A[3:6, 9:13] = rz(x[5])
-            # B[6:9, 0:3] = np.eye(3) / m  # unnecessary; should already be this
-            J_w_inv = rz(x[5]) @ np.linalg.inv(J) @ rz(x[5]).T
+            A[3:6, 9:13] = rz(x[k, 5])
+            J_w_inv = rz(x[k, 5]) @ np.linalg.inv(J) @ rz(x[k, 5]).T
             B[9:12, 0:3] = J_w_inv @ rhat
             B[9:12, 6:9] = J_w_inv
-            AB = np.vstack((np.hstack((A, B)), np.zeros((n_u, n_x + n_u))))
-            M = expm(AB * t)
-            Ad = M[0:n_x - 1, 0:n_x - 1]
-            Gd = M[0:n_x - 1, n_x - 1]  # gravity in the world frame
-            Bd = M[0:n_x - 1, n_x:n_x + n_u]
+            '''
+            Ak = np.eye(n_x) + A * t  # first order Euler integration
+            Bk = B * t
+            Gk = G * t
+            '''
+            A_bar = np.hstack(A, B, G)
+            I_bar = np.hstack(np.eye(n_x), np.zeros((n_x, n_u + 1)))
+            print("A_bar = ", np.shape(A_bar), " I_bar = ", np.shape(I_bar))
+            M = I_bar + A_bar * t + 0.5 * (t**2) * A_bar @ A_bar
+            Ak = M[0:n_x, :]
+            Bk = M[n_x:n_x+n_u, :]
+            Gk = M[-1, :]
 
             if C[k] == 0:  # even
                 u_ref[-1] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
+                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
                            0 == fx,
                            0 == fy,
                            0 == fz]
             else:  # odd
                 u_ref[-1] = m * g * 2
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
+                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
                            0 >= fx - mu * fz,
                            0 >= -fx - mu * fz,
                            0 >= fy - mu * fz,

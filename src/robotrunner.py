@@ -2,12 +2,11 @@
 Copyright (C) 2020-2022 Benjamin Bokser
 """
 import plots
-import mpc_cvx
+import mpc_euler
 
 import numpy as np
 import copy
-from utils import H, T, hat, L, R, rz, quat2euler, convert
-# from scipy.linalg import expm
+from utils import H, hat, L, R, convert
 import itertools
 
 np.set_printoptions(suppress=True, linewidth=np.nan)
@@ -33,28 +32,15 @@ class Runner:
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
         self.N_k = self.N * self.mpc_factor  # total mpc prediction horizon length (timesteps)
-        n_x = 12+1  # number of states + gravity
-        n_u = 6  # number of controls
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
         self.X_f = np.hstack([2, 2, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
-        phi = quat2euler(self.X_0[3:7])[2]  # extract z-axis euler angle
-        self.A = np.zeros((n_x, n_x))
-        self.A[0:3, 6:9] = np.eye(3)
-        self.A[3:6, 9:13] = rz(phi)
-        self.B = np.zeros((n_x, n_u))
-        self.B[6:9, 0:3] = np.eye(3) / self.m
-        J_w_inv = rz(phi) @ np.linalg.inv(self.J) @ rz(phi).T
-        self.B[9:12, 0:3] = J_w_inv @ rhat
-        self.B[9:12, 6:9] = J_w_inv
-
         mu = 0.3  # coeff of friction
-        self.mpc = mpc_cvx.Mpc(t=self.mpc_dt, N=self.N, A=self.A, B=self.B, J=self.J, rhat=rhat,
-                               m=self.m, g=self.g, mu=mu)
-        self.n_x = n_x
-        self.n_u = n_u
+        self.mpc = mpc_euler.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N, J=self.J, rhat=rhat, m=self.m, g=self.g, mu=mu)
+        self.n_X = 13
+        self.n_U = 6
 
     def run(self):
         total = self.total_run + 1  # number of timesteps to plot
@@ -63,15 +49,15 @@ class Runner:
 
         mpc_factor = self.mpc_factor  # repeat mpc every x seconds
         mpc_counter = copy.copy(mpc_factor)
-        X_traj = np.zeros((total, self.n_x))
+        X_traj = np.zeros((total, self.n_X))
         X_traj[0, :] = self.X_0  # initial conditions
-        f_hist = np.zeros((total, self.n_u))
+        f_hist = np.zeros((total, self.n_U))
         s_hist = np.zeros(total)
-        U = np.zeros(self.n_u)
-        pf_ref = np.zeros(self.n_u)
+        U = np.zeros(self.n_U)
+        pf_ref = np.zeros(self.n_U)
         j = int(self.mpc_factor)
-        f_pred_hist = np.zeros((total, self.n_u))
-        p_pred_hist = np.zeros((total, self.n_u))
+        f_pred_hist = np.zeros((total, self.n_U))
+        p_pred_hist = np.zeros((total, self.n_U))
         for k in range(0, self.total_run):
             t = t + self.dt
 
@@ -91,12 +77,12 @@ class Runner:
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
 
-        plots.fplot(total, p_hist=X_traj[:, 0:self.n_u], f_hist=f_hist, s_hist=s_hist)
-        plots.posplot(p_ref=self.X_f[0:self.n_u], p_hist=X_traj[:, 0:self.n_u])
-        plots.posfplot(p_ref=self.X_f[0:self.n_u], p_hist=X_traj[:, 0:self.n_u],
+        plots.fplot(total, p_hist=X_traj[:, 0:self.n_U], f_hist=f_hist, s_hist=s_hist)
+        plots.posplot(p_ref=self.X_f[0:self.n_U], p_hist=X_traj[:, 0:self.n_U])
+        plots.posfplot(p_ref=self.X_f[0:self.n_U], p_hist=X_traj[:, 0:self.n_U],
                        p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
-        # plots.posplot(p_ref=self.X_f[0:self.n_u], p_hist=X_pred_hist[:, 0:self.n_u, 1], dims=self.dims)
-        # plots.posplot_t(p_ref=self.X_ref[0:self.n_u], p_hist=X_traj[:, 0:2], total=total)
+        # plots.posplot(p_ref=self.X_f[0:self.n_U], p_hist=X_pred_hist[:, 0:self.n_U, 1], dims=self.dims)
+        # plots.posplot_t(p_ref=self.X_ref[0:self.n_U], p_hist=X_traj[:, 0:2], total=total)
 
         return None
 
