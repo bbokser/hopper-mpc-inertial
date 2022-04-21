@@ -9,11 +9,12 @@ import itertools
 from utils import rz, quat2euler
 
 
-def rz_c(phi):
-    # casadi version
-    Rz = [[cs.cos(phi), cs.sin(phi), 0.0],
-          [-cs.sin(phi), cs.cos(phi), 0.0],
-          [0.0, 0.0, 1.0]]
+def rz_c(phi):  # casadi version
+    Rz = cs.SX.eye(3)
+    Rz[0, 0] = cs.cos(phi)
+    Rz[0, 1] = cs.sin(phi)
+    Rz[1, 0] = -cs.sin(phi)
+    Rz[1, 1] = cs.cos(phi)
     return Rz
 
 
@@ -30,15 +31,15 @@ class Mpc:
         self.g = g
         self.mu = mu
         phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
-        A = np.zeros((n_x, n_x))
+        A = cs.SX.zeros(n_x, n_x)
         A[0:3, 6:9] = np.eye(3)
-        A[3:6, 9:13] = rz(phi)
-        B = np.zeros((n_x, n_u))
+        A[3:6, 9:] = rz(phi)
+        B = cs.SX.zeros(n_x, n_u)
         B[6:9, 0:3] = np.eye(3) / self.m
         J_w_inv = rz(phi) @ np.linalg.inv(self.J) @ rz(phi).T
         B[9:12, 0:3] = J_w_inv @ rhat
         B[9:12, 3:6] = J_w_inv
-        G = np.zeros(n_x)
+        G = cs.SX.zeros(n_x, 1)
         G[8] = -self.g
         self.A = A
         self.B = B
@@ -113,19 +114,18 @@ class Mpc:
                      + cs.mtimes(cs.mtimes((uk - u_refk).T, R), uk - u_refk)
 
             rz_phi = rz_c(xk[5])
-            A[3:6, 9:13] = rz_phi
+            A[3:6, 9:] = rz_phi
             J_w_inv = rz_phi @ np.linalg.inv(J) @ rz_phi.T
             B[9:12, 0:3] = J_w_inv @ rhat
-            B[9:12, 6:9] = J_w_inv
-            A_bar = np.hstack(A, B, G)
-            I_bar = np.hstack(np.eye(n_x), np.zeros((n_x, n_u + 1)))
-
-            print("A_bar = ", np.shape(A_bar), " I_bar = ", np.shape(I_bar))
+            B[9:12, 3:] = J_w_inv
+            A_bar = cs.horzcat(cs.horzcat(A, B), G)
+            A_bar = cs.vertcat(A_bar, np.zeros((n_u+1, n_x+n_u+1)))
+            I_bar = np.eye(n_x+n_u+1)
 
             M = I_bar + A_bar * t + 0.5 * (t ** 2) * A_bar @ A_bar
-            Ak = M[0:n_x, :]
-            Bk = M[n_x:n_x + n_u, :]
-            Gk = M[-1, :]
+            Ak = M[0:n_x, 0:n_x]
+            Bk = M[0:n_x, n_x:n_x + n_u]
+            Gk = M[0:n_x, -1]
             dyn = cs.mtimes(Ak, xk) + cs.mtimes(Bk, uk) + Gk
             constr_dyn[k] = x[:, k + 1] - dyn  # compute constraints
             if C[k] == 1:
