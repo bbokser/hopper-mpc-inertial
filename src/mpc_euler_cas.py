@@ -3,6 +3,7 @@ Copyright (C) 2020-2021 Benjamin Bokser
 """
 
 import numpy as np
+from numpy import matlib
 import casadi as cs
 import itertools
 
@@ -25,7 +26,7 @@ class Mpc:
         n_u = 6  # number of controls
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
-        self.J = J
+        self.Jinv = np.linalg.inv(J)
         self.rhat = rhat
         self.m = m  # kg
         self.g = g
@@ -33,10 +34,11 @@ class Mpc:
         phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
         A = cs.SX.zeros(n_x, n_x)
         A[0:3, 6:9] = np.eye(3)
-        A[3:6, 9:] = rz(phi)
+        rz_phi = rz(phi)
+        A[3:6, 9:] = rz_phi
         B = cs.SX.zeros(n_x, n_u)
         B[6:9, 0:3] = np.eye(3) / self.m
-        J_w_inv = rz(phi) @ np.linalg.inv(self.J) @ rz(phi).T
+        J_w_inv = rz_phi @ self.Jinv @ rz_phi.T
         B[9:12, 0:3] = J_w_inv @ rhat
         B[9:12, 3:6] = J_w_inv
         G = cs.SX.zeros(n_x, 1)
@@ -56,7 +58,7 @@ class Mpc:
         A = self.A
         B = self.B
         G = self.G
-        J = self.J
+        Jinv = self.Jinv
         rhat = self.rhat
         n_x = self.n_x
         n_u = self.n_u
@@ -92,12 +94,12 @@ class Mpc:
         x = cs.SX.sym('x', n_x, (N + 1))  # represents the states over the opt problem.
         u = cs.SX.sym('u', n_u, N)  # decision variables, control action matrix
 
-        obj = [None] * N  # preallocate objective function
-        constr_dyn = [None] * N  # preallocate constraints
-        constr_fricx1 = [None] * N  # preallocate constraints
-        constr_fricx2 = [None] * N  # preallocate constraints
-        constr_fricy1 = [None] * N  # preallocate constraints
-        constr_fricy2 = [None] * N  # preallocate constraints
+        obj = 0
+        constr_dyn = []
+        constr_fricx1 = []
+        constr_fricx2 = []
+        constr_fricy1 = []
+        constr_fricy2 = []
         Q = np.eye(n_x)
         R = np.eye(n_u)
 
@@ -110,12 +112,12 @@ class Mpc:
             uk = u[:, k]  # control action
             u_refk = m * g * 2
             # calculate objective
-            obj[k] = cs.mtimes(cs.mtimes((xk - x_refk).T, Q), xk - x_refk) \
-                     + cs.mtimes(cs.mtimes((uk - u_refk).T, R), uk - u_refk)
+            obj = obj + cs.mtimes(cs.mtimes((xk - x_refk).T, Q), xk - x_refk) \
+                + cs.mtimes(cs.mtimes((uk - u_refk).T, R), uk - u_refk)
 
             rz_phi = rz_c(xk[5])
             A[3:6, 9:] = rz_phi
-            J_w_inv = rz_phi @ np.linalg.inv(J) @ rz_phi.T
+            J_w_inv = rz_phi @ Jinv @ rz_phi.T
             B[9:12, 0:3] = J_w_inv @ rhat
             B[9:12, 3:] = J_w_inv
             A_bar = cs.horzcat(cs.horzcat(A, B), G)
@@ -127,15 +129,22 @@ class Mpc:
             Bk = M[0:n_x, n_x:n_x + n_u]
             Gk = M[0:n_x, -1]
             dyn = cs.mtimes(Ak, xk) + cs.mtimes(Bk, uk) + Gk
-            constr_dyn[k] = x[:, k + 1] - dyn  # compute constraints
+            constr_dyn = cs.vertcat(constr_dyn, x[:, k + 1] - dyn)  # compute constraints
             if C[k] == 1:
-                constr_fricx1[k] = uk[0] - mu * uk[2]  # fx - mu*fz
-                constr_fricx2[k] = -uk[0] - mu * uk[2]  # fx - mu*fz
-                constr_fricy1[k] = uk[1] - mu * uk[2]  # fx - mu*fz
-                constr_fricy2[k] = -uk[1] - mu * uk[2]  # fx - mu*fz
+                constr_fricx1 = cs.vertcat(constr_fricx1, uk[0] - mu * uk[2])  # fx - mu*fz
+                constr_fricx2 = cs.vertcat(constr_fricx2, -uk[0] - mu * uk[2])  # fx - mu*fz
+                constr_fricy1 = cs.vertcat(constr_fricx1, uk[1] - mu * uk[2])  # fx - mu*fz
+                constr_fricy2 = cs.vertcat(constr_fricx1, -uk[1] - mu * uk[2])  # fx - mu*fz
 
         # I guess this appends them??
-        constr = constr_init + constr_dyn + constr_fricx1 + constr_fricx2 + constr_fricy1 + constr_fricy2
+        constr = []
+        constr = cs.vertcat(constr, constr_init)
+        constr = cs.vertcat(constr, constr_dyn)
+        constr = cs.vertcat(constr, constr_fricx1)
+        constr = cs.vertcat(constr, constr_fricx2)
+        constr = cs.vertcat(constr, constr_fricy1)
+        constr = cs.vertcat(constr, constr_fricy2)
+        print(type(constr))
         opt_variables = cs.vertcat(cs.reshape(x, n_x * (N + 1), 1), cs.reshape(u, n_u * N, 1))
         qp = {'x': opt_variables, 'f': obj, 'g': constr, 'p': x_p}
         opts = {'print_time': 0, 'error_on_fail': 0, 'printLevel': "none", 'boundTolerance': 1e-6,
@@ -155,9 +164,7 @@ class Mpc:
 
         ubfx, ubfy, ubfz, lbfx, lbfy, lbfz = ([0] * N,) * 6  # [0 for i in range(N)]
         for k in range(0, N):
-            if C[k] == 0:  # if leg is not in contact... don't calculate output forces.
-                pass
-            else:
+            if C[k] == 1:  # only calculate leg forces if leg is in contact
                 ubfx[k] = 200
                 ubfy[k] = 200
                 ubfz[k] = 200
@@ -173,7 +180,7 @@ class Mpc:
 
         # --- setup is finished, now solve --- #
         u0 = np.zeros((N, n_u))  # six control inputs
-        x0_init = np.matlib.repmat(x_in, 1, N + 1).T  # initialization of the state's decision variables
+        x0_init = matlib.repmat(x_in, 1, N + 1).T  # initialization of the state's decision variables
 
         # parameters and xin must be changed every timestep
         parameters = cs.vertcat(x_in, x_ref_in)  # set values of parameters vector
