@@ -77,10 +77,10 @@ class Runner:
 
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
-
-        plots.fplot(total, p_hist=X_traj[:, 0:self.n_U], f_hist=f_hist, s_hist=s_hist)
-        plots.posplot(p_ref=self.X_f[0:self.n_U], p_hist=X_traj[:, 0:self.n_U])
-        plots.posfplot(p_ref=self.X_f[0:self.n_U], p_hist=X_traj[:, 0:self.n_U],
+            print(k, "\n")
+        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3])
+        plots.posfplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
                        p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         # plots.posplot(p_ref=self.X_f[0:self.n_U], p_hist=X_pred_hist[:, 0:self.n_U, 1], dims=self.dims)
         # plots.posplot_t(p_ref=self.X_ref[0:self.n_U], p_hist=X_traj[:, 0:2], total=total)
@@ -101,13 +101,13 @@ class Runner:
         tau = U[3:]  # W frame
         Q = L(q) @ R(q).T
         dp = H.T @ Q @ H @ v  # rotate v from body to world frame
-        dq = 0.5 * L(q) * H * w
+        dq = 0.5 * L(q) @ H @ w
         Fgn = np.array([0, 0, -g]) * m  # Gravitational force in world frame
         Fgb = H.T @ Q.T @ H @ Fgn  # rotate Fgn from world frame to body frame
         Ft = F + Fgb  # total force
         dv = 1 / m * Ft - np.cross(w, v)
-        dw = np.linalg.solve(J, tau - np.cross(w, J * w))
-        dx = np.vstack(dp, dq, dv, dw)
+        dw = np.linalg.solve(J, tau - np.cross(w, J @ w))
+        dx = np.hstack((dp, dq, dv, dw)).T
         return dx
 
     def rk4_normalized(self, xk, uk):
@@ -119,7 +119,7 @@ class Runner:
         f3 = dynamics(xk + 0.5 * h * f2, uk)
         f4 = dynamics(xk + h * f3, uk)
         xn = xk + (h / 6.0) * (f1 + 2 * f2 + 2 * f3 + f4)
-        xn[4:7] = xn[3:7] / np.linalg.norm(xn[3:7])  # normalize the quaternion term
+        xn[3:7] = xn[3:7] / np.linalg.norm(xn[3:7])  # normalize the quaternion term
         return xn
 
     def gait_scheduler(self, t, t0):

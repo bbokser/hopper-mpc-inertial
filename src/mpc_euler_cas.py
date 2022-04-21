@@ -3,7 +3,6 @@ Copyright (C) 2020-2021 Benjamin Bokser
 """
 
 import numpy as np
-from numpy import matlib
 import casadi as cs
 import itertools
 
@@ -62,34 +61,7 @@ class Mpc:
         rhat = self.rhat
         n_x = self.n_x
         n_u = self.n_u
-        '''
-        p_x = cs.SX.sym('p_x')
-        p_y = cs.SX.sym('p_y')
-        p_z = cs.SX.sym('p_z')
-        theta_x = cs.SX.sym('theta_x')
-        theta_y = cs.SX.sym('theta_y')
-        theta_z = cs.SX.sym('theta_z')
-        dp_x = cs.SX.sym('dp_x')
-        dp_y = cs.SX.sym('dp_y')
-        dp_z = cs.SX.sym('dp_z')
-        omega_x = cs.SX.sym('theta_x')
-        omega_y = cs.SX.sym('theta_y')
-        omega_z = cs.SX.sym('theta_z')
-        states = [p_x, p_y, p_z,
-                  theta_x, theta_y, theta_z,
-                  dp_x, dp_y, dp_z,
-                  omega_x, omega_y, omega_z]  # state vec x
-        n_states = len(states)  # number of states
 
-        f_x = cs.SX.sym('f_x')  # control force x
-        f_y = cs.SX.sym('f_y')  # control force y
-        f_z = cs.SX.sym('f_z')  # control force z
-        tau_x = cs.SX.sym('tau_x')
-        tau_y = cs.SX.sym('tau_y')
-        tau_z = cs.SX.sym('tau_z')
-        controls = [f_x, f_y, f_z, tau_x, tau_y, tau_z]
-        n_u = len(controls)  # number of controls
-        '''
         x_p = cs.SX.sym('x_p', n_x, (N + 1))  # params: x_in and x_ref
         x = cs.SX.sym('x', n_x, (N + 1))  # represents the states over the opt problem.
         u = cs.SX.sym('u', n_u, N)  # decision variables, control action matrix
@@ -136,7 +108,7 @@ class Mpc:
                 constr_fricy1 = cs.vertcat(constr_fricx1, uk[1] - mu * uk[2])  # fx - mu*fz
                 constr_fricy2 = cs.vertcat(constr_fricx1, -uk[1] - mu * uk[2])  # fx - mu*fz
 
-        # I guess this appends them??
+        # append them
         constr = []
         constr = cs.vertcat(constr, constr_init)
         constr = cs.vertcat(constr, constr_dyn)
@@ -144,7 +116,7 @@ class Mpc:
         constr = cs.vertcat(constr, constr_fricx2)
         constr = cs.vertcat(constr, constr_fricy1)
         constr = cs.vertcat(constr, constr_fricy2)
-        print(type(constr))
+
         opt_variables = cs.vertcat(cs.reshape(x, n_x * (N + 1), 1), cs.reshape(u, n_u * N, 1))
         qp = {'x': opt_variables, 'f': obj, 'g': constr, 'p': x_p}
         opts = {'print_time': 0, 'error_on_fail': 0, 'printLevel': "none", 'boundTolerance': 1e-6,
@@ -180,10 +152,11 @@ class Mpc:
 
         # --- setup is finished, now solve --- #
         u0 = np.zeros((N, n_u))  # six control inputs
-        x0_init = matlib.repmat(x_in, 1, N + 1).T  # initialization of the state's decision variables
+        x0_init = np.tile(x_in, (1, N + 1)).T  # initialization of the state's decision variables
 
         # parameters and xin must be changed every timestep
-        parameters = cs.vertcat(x_in, x_ref_in)  # set values of parameters vector
+        # parameters = cs.vertcat(np.reshape(x_in, (1, 12)), x_ref_in).T  # set values of parameters vector
+        parameters = cs.horzcat(x_in, x_ref_in.T)  # set values of parameters vector
         # init value of optimization variables
         x0 = cs.vertcat(np.reshape(x0_init.T, (n_x * (N + 1), 1)), np.reshape(u0.T, (n_u * N, 1)))
 
