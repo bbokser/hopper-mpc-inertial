@@ -2,7 +2,7 @@
 Copyright (C) 2020-2022 Benjamin Bokser
 """
 import plots
-import mpc_euler
+import mpc_euler_cas
 
 import numpy as np
 import copy
@@ -38,7 +38,8 @@ class Runner:
         self.X_0 = np.array([0, 0, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
         self.X_f = np.hstack([2, 2, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 0.3  # coeff of friction
-        self.mpc = mpc_euler.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N, J=self.J, rhat=rhat, m=self.m, g=self.g, mu=mu)
+        self.mpc = mpc_euler_cas.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N,
+                                     J=self.J, rhat=rhat, m=self.m, g=self.g, mu=mu)
         self.n_X = 13
         self.n_U = 6
 
@@ -69,7 +70,7 @@ class Runner:
                 x_in = convert(X_traj[k, :])  # convert to mpc states
                 x_ref = self.path_plan(x_in=x_in)
                 x_refN = x_ref[::int(mpc_factor)]
-                U = self.mpc.mpcontrol(x_in=x_in, x_ref=x_refN, C=C)
+                U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refN, C=C)
 
             mpc_counter += 1
             f_hist[k, :] = U * s  # take first timestep
