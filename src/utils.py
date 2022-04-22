@@ -85,3 +85,11 @@ def convert(X_in):
     X0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
     X0[9:] = X_in[10:13]  # both w in body frame, yay!
     return X0
+
+
+def quat2rot(Q):
+    w, x, y, z = Q
+    R = np.array([[2 * (w ** 2 + x ** 2) - 1, 2 * (x * y - w * z), 2 * (x * z + w * y)],
+                  [2 * (x * y + w * z), 2 * (w ** 2 + y ** 2) - 1, 2 * (y * z - w * x)],
+                  [2 * (x * z - w * y), 2 * (y * z + w * x), 2 * (w ** 2 + z ** 2) - 1]])
+    return R

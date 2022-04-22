@@ -85,13 +85,12 @@ class Runner:
 
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
-            # print(100*k/self.total_run, "%")
-        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
-        plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3])
-        plots.posfplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
-                       p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
-        # plots.posplot(p_ref=self.X_f[0:self.n_U], p_hist=X_pred_hist[:, 0:self.n_U, 1], dims=self.dims)
-        # plots.posplot_t(p_ref=self.X_ref[0:self.n_U], p_hist=X_traj[:, 0:2], total=total)
+
+        # plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
+        #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
+        # plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3])
+        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::20, :])
 
         return None
 
