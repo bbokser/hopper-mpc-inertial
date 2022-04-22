@@ -3,17 +3,19 @@ Copyright (C) 2020-2022 Benjamin Bokser
 """
 import plots
 import mpc_euler_cas
+import mpc_euler
+from utils import H, hat, L, R, convert
 
+from tqdm import tqdm
 import numpy as np
 import copy
-from utils import H, hat, L, R, convert
 import itertools
 
 np.set_printoptions(suppress=True, linewidth=np.nan)
 
 
 class Runner:
-    def __init__(self, dyn='euler', dt=1e-3):
+    def __init__(self, tool='cvxpy', dyn='euler', dt=1e-3):
         self.dyn = dyn
         self.dt = dt
         self.total_run = 5000
@@ -24,6 +26,7 @@ class Runner:
                            [2067970.36, -87045.58, 76287220.47]])*1000  # g/mm2 to kg/m2
         self.r = np.array([0.02201854, 6.80044366, 0.97499173]) * 1000  # mm to m
         rhat = hat(self.r)
+        Jinv = np.linalg.inv(self.J)
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # gait period, seconds
         self.phi_switch = 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
@@ -36,10 +39,16 @@ class Runner:
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([2, 2, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([2, 2, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 0.3  # coeff of friction
-        self.mpc = mpc_euler_cas.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N,
-                                     J=self.J, rhat=rhat, m=self.m, g=self.g, mu=mu)
+
+        mpc_tool = None
+        if tool == 'cvxpy':
+            mpc_tool = mpc_euler
+        elif tool == 'casadi':
+            mpc_tool = mpc_euler_cas
+
+        self.mpc = mpc_tool.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N, Jinv=Jinv, rhat=rhat, m=self.m, g=self.g, mu=mu)
         self.n_X = 13
         self.n_U = 6
 
@@ -55,11 +64,10 @@ class Runner:
         f_hist = np.zeros((total, self.n_U))
         s_hist = np.zeros(total)
         U = np.zeros(self.n_U)
-        pf_ref = np.zeros(self.n_U)
-        j = int(self.mpc_factor)
+        pf_ref = np.zeros((total, self.n_U))
         f_pred_hist = np.zeros((total, self.n_U))
         p_pred_hist = np.zeros((total, self.n_U))
-        for k in range(0, self.total_run):
+        for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
             s = self.gait_scheduler(t, t0)
@@ -68,16 +76,16 @@ class Runner:
                 mpc_counter = 0  # restart the mpc counter
                 C = self.gait_map(t, t0)
                 x_in = convert(X_traj[k, :])  # convert to mpc states
-                x_ref = self.path_plan(x_in=x_in)
+                x_ref = self.path_plan(x_in=x_in, xf=convert(self.X_f))
                 x_refN = x_ref[::int(mpc_factor)]
                 U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refN, C=C)
 
             mpc_counter += 1
-            f_hist[k, :] = U * s  # take first timestep
+            f_hist[k, :] = U  # * s  # take first timestep
 
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
-            print(k, "\n")
+            # print(100*k/self.total_run, "%")
         plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3])
         plots.posfplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
@@ -138,23 +146,29 @@ class Runner:
             ts += self.mpc_dt
         return C
 
-    def path_plan(self, x_in):
+    def path_plan(self, x_in, xf):
         # Path planner--generate reference trajectory in MPC state space!!!
         dt = self.dt
-        xf = convert(self.X_f)
-        size_mpc = int(self.mpc_factor * self.N)  # length of MPC horizon in s TODO: Perhaps N should vary wrt time?
-        t_ref = int(np.minimum(size_mpc, np.linalg.norm(xf[0:2] - x_in[0:2]) * 1000))
+        t_mpc = int(self.N_k)  # length of MPC horizon in ts TODO: Perhaps N should vary wrt time?
+        t_e = np.linalg.norm(xf[0:2] - x_in[0:2]) * 2000  # expected required time to reach target
+        if t_mpc < t_e:
+            t_ref = t_mpc
+            per = 1 - (t_e - t_mpc)/t_e  # percent of the expected time the mpc actually has
+            xf[0:2] = x_in[0:2] + (xf[0:2] - x_in[0:2]) * per  # interpolate new xf and yf based on allotted time
+        else:
+            t_ref = int(t_e)
+        # print(x_in[0:3], xf[0:3])
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
         # interpolate linear velocities
         x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
 
-        if (size_mpc - t_ref) == 0:
+        if t_mpc == t_ref:
             pass
         elif t_ref == 0:
-            x_ref = np.array(list(itertools.repeat(xf, int(size_mpc))))
+            x_ref = np.array(list(itertools.repeat(xf, int(t_mpc))))
         else:
-            x_ref = np.vstack((x_ref, list(itertools.repeat(xf, int(size_mpc - t_ref)))))
+            x_ref = np.vstack((x_ref, list(itertools.repeat(xf, int(t_mpc - t_ref)))))
 
         return x_ref

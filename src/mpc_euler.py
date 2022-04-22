@@ -5,16 +5,17 @@ Copyright (C) 2021-2022 Benjamin Bokser
 import numpy as np
 import cvxpy as cp
 from utils import rz, quat2euler
+from scipy.linalg import expm
 
 
 class Mpc:
 
-    def __init__(self, X_0, t, N, J, rhat, m, g, mu, **kwargs):
+    def __init__(self, X_0, t, N, Jinv, rhat, m, g, mu, **kwargs):
         n_x = 12  # number of states
         n_u = 6  # number of controls
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
-        self.J = J
+        self.Jinv = Jinv
         self.rhat = rhat
         self.m = m  # kg
         self.g = g
@@ -25,18 +26,19 @@ class Mpc:
         A[3:6, 9:13] = rz(phi)
         B = np.zeros((n_x, n_u))
         B[6:9, 0:3] = np.eye(3) / self.m
-        J_w_inv = rz(phi) @ np.linalg.inv(self.J) @ rz(phi).T
+        J_w_inv = rz(phi) @ Jinv @ rz(phi).T
         B[9:12, 0:3] = J_w_inv @ rhat
         B[9:12, 3:6] = J_w_inv
-        G = np.zeros(n_x)
-        G[8] = -self.g
+        G = np.zeros((n_x, 1))
+        G[8, :] = -self.g
         self.A = A
         self.B = B
         self.G = G
         self.n_x = n_x
         self.n_u = n_u
 
-    def mpcontrol(self, x_in, x_ref, C):
+    def mpcontrol(self, x_in, x_ref_in, C):
+        x_ref = x_ref_in
         N = self.N
         t = self.t
         m = self.m
@@ -45,17 +47,30 @@ class Mpc:
         A = self.A
         B = self.B
         G = self.G
-        J = self.J
+        Jinv = self.Jinv
         rhat = self.rhat
         n_x = self.n_x
         n_u = self.n_u
         x = cp.Variable((N+1, n_x))
         u = cp.Variable((N, n_u))
         Q = np.eye(n_x)
-        R = np.eye(n_u)
+        R = np.eye(n_u)*0
         cost = 0
         constr = []
         u_ref = np.zeros(n_u)
+        # TODO: Make Rz_phi a param instead of setting up the problem on every run
+        rz_phi = rz(x_in[5])
+        A[3:6, 9:] = rz_phi
+        J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
+        B[9:12, 0:3] = J_w_inv @ rhat
+        B[9:12, 3:] = J_w_inv
+        A_bar = np.vstack((np.hstack((A, B, G)), np.zeros((n_u + 1, n_x + n_u + 1))))
+        # I_bar = np.eye(n_x + n_u + 1)
+        # M = I_bar + A_bar * t + 0.5 * (t ** 2) * A_bar @ A_bar
+        M = expm(A_bar * t)
+        Ad = M[0:n_x, 0:n_x]
+        Bd = M[0:n_x, n_x:n_x + n_u]
+        Gd = M[0:n_x, -1]
 
         # --- calculate cost & constraints --- #
         np.fill_diagonal(Q, [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.])
@@ -67,49 +82,32 @@ class Mpc:
             fx = u[k, 0]
             fy = u[k, 1]
             fz = u[k, 2]
-
-            A[3:6, 9:13] = rz(x[k, 5])
-            J_w_inv = rz(x[k, 5]) @ np.linalg.inv(J) @ rz(x[k, 5]).T
-            B[9:12, 0:3] = J_w_inv @ rhat
-            B[9:12, 6:9] = J_w_inv
-            '''
-            Ak = np.eye(n_x) + A * t  # first order Euler integration
-            Bk = B * t
-            Gk = G * t
-            '''
-            A_bar = np.hstack(A, B, G)
-            I_bar = np.hstack(np.eye(n_x), np.zeros((n_x, n_u + 1)))
-            print("A_bar = ", np.shape(A_bar), " I_bar = ", np.shape(I_bar))
-            M = I_bar + A_bar * t + 0.5 * (t**2) * A_bar @ A_bar
-            Ak = M[0:n_x, :]
-            Bk = M[n_x:n_x+n_u, :]
-            Gk = M[-1, :]
-
             if C[k] == 0:  # even
-                u_ref[-1] = 0
+                u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
+                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
                            0 == fx,
                            0 == fy,
                            0 == fz]
             else:  # odd
-                u_ref[-1] = m * g * 2
+                u_ref[2] = m * g * 2
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
+                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
                            0 >= fx - mu * fz,
                            0 >= -fx - mu * fz,
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
                            fz >= 0,
                            z <= 3,
-                           z >= 0]
-        constr += [x[0, :] == x_in, x[N, :] == x_ref[-1, :]]  # initial and final condition
+                           z >= 0.3]
+        constr += [x[0, :] == x_in]  #, x[-1, :] == x_ref[-1, :]]  # initial and final condition
         # --- set up solver --- #
         problem = cp.Problem(cp.Minimize(cost), constr)
-        problem.solve(solver=cp.ECOS)  #, verbose=True)
-        u = u.value[0, :]
-        if u is None:
+        problem.solve(solver=cp.ECOS)  # , verbose=True)
+        if u.value is None:
             raise Exception("\n *** QP FAILED *** \n")
+
+        u = u.value[0, :]
         # print(u)
         # breakpoint()
         return u

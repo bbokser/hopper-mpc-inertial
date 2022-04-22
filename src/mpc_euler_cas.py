@@ -9,35 +9,26 @@ import itertools
 from utils import rz, quat2euler
 
 
-def rz_c(phi):  # casadi version
-    Rz = cs.SX.eye(3)
-    Rz[0, 0] = cs.cos(phi)
-    Rz[0, 1] = cs.sin(phi)
-    Rz[1, 0] = -cs.sin(phi)
-    Rz[1, 1] = cs.cos(phi)
-    return Rz
-
-
 class Mpc:
 
-    def __init__(self, X_0, t, N, J, rhat, m, g, mu, **kwargs):
+    def __init__(self, X_0, t, N, Jinv, rhat, m, g, mu, **kwargs):
         n_x = 12  # number of states
         n_u = 6  # number of controls
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
-        self.Jinv = np.linalg.inv(J)
+        self.Jinv = Jinv
         self.rhat = rhat
         self.m = m  # kg
         self.g = g
         self.mu = mu
-        phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
         A = cs.SX.zeros(n_x, n_x)
         A[0:3, 6:9] = np.eye(3)
+        phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
         rz_phi = rz(phi)
         A[3:6, 9:] = rz_phi
         B = cs.SX.zeros(n_x, n_u)
         B[6:9, 0:3] = np.eye(3) / self.m
-        J_w_inv = rz_phi @ self.Jinv @ rz_phi.T
+        J_w_inv = rz_phi @ Jinv @ rz_phi.T
         B[9:12, 0:3] = J_w_inv @ rhat
         B[9:12, 3:6] = J_w_inv
         G = cs.SX.zeros(n_x, 1)
@@ -61,6 +52,20 @@ class Mpc:
         rhat = self.rhat
         n_x = self.n_x
         n_u = self.n_u
+
+        # TODO: Make Rz_phi a param instead of setting up the problem on every run
+        rz_phi = rz(x_in[5])
+        A[3:6, 9:] = rz_phi
+        J_w_inv = rz_phi @ Jinv @ rz_phi.T
+        B[9:12, 0:3] = J_w_inv @ rhat
+        B[9:12, 3:] = J_w_inv
+        A_bar = cs.horzcat(cs.horzcat(A, B), G)
+        A_bar = cs.vertcat(A_bar, np.zeros((n_u + 1, n_x + n_u + 1)))
+        I_bar = np.eye(n_x + n_u + 1)
+        M = I_bar + A_bar * t + 0.5 * (t ** 2) * A_bar @ A_bar
+        Ad = M[0:n_x, 0:n_x]
+        Bd = M[0:n_x, n_x:n_x + n_u]
+        Gd = M[0:n_x, -1]
 
         x_p = cs.SX.sym('x_p', n_x, (N + 1))  # params: x_in and x_ref
         x = cs.SX.sym('x', n_x, (N + 1))  # represents the states over the opt problem.
@@ -86,21 +91,7 @@ class Mpc:
             # calculate objective
             obj = obj + cs.mtimes(cs.mtimes((xk - x_refk).T, Q), xk - x_refk) \
                 + cs.mtimes(cs.mtimes((uk - u_refk).T, R), uk - u_refk)
-
-            rz_phi = rz_c(xk[5])
-            A[3:6, 9:] = rz_phi
-            J_w_inv = rz_phi @ Jinv @ rz_phi.T
-            B[9:12, 0:3] = J_w_inv @ rhat
-            B[9:12, 3:] = J_w_inv
-            A_bar = cs.horzcat(cs.horzcat(A, B), G)
-            A_bar = cs.vertcat(A_bar, np.zeros((n_u+1, n_x+n_u+1)))
-            I_bar = np.eye(n_x+n_u+1)
-
-            M = I_bar + A_bar * t + 0.5 * (t ** 2) * A_bar @ A_bar
-            Ak = M[0:n_x, 0:n_x]
-            Bk = M[0:n_x, n_x:n_x + n_u]
-            Gk = M[0:n_x, -1]
-            dyn = cs.mtimes(Ak, xk) + cs.mtimes(Bk, uk) + Gk
+            dyn = cs.mtimes(Ad, xk) + cs.mtimes(Bd, uk) + Gd
             constr_dyn = cs.vertcat(constr_dyn, x[:, k + 1] - dyn)  # compute constraints
             if C[k] == 1:
                 constr_fricx1 = cs.vertcat(constr_fricx1, uk[0] - mu * uk[2])  # fx - mu*fz
