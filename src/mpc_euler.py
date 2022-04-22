@@ -10,7 +10,7 @@ from scipy.linalg import expm
 
 class Mpc:
 
-    def __init__(self, X_0, t, N, Jinv, rhat, m, g, mu, **kwargs):
+    def __init__(self, t, N, Jinv, rhat, m, g, mu, **kwargs):
         n_x = 12  # number of states
         n_u = 6  # number of controls
         self.t = t  # sampling time (s)
@@ -20,15 +20,15 @@ class Mpc:
         self.m = m  # kg
         self.g = g
         self.mu = mu
-        phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
+        # phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
         A = np.zeros((n_x, n_x))
         A[0:3, 6:9] = np.eye(3)
-        A[3:6, 9:13] = rz(phi)
+        # A[3:6, 9:13] = rz(phi)
         B = np.zeros((n_x, n_u))
         B[6:9, 0:3] = np.eye(3) / self.m
-        J_w_inv = rz(phi) @ Jinv @ rz(phi).T
-        B[9:12, 0:3] = J_w_inv @ rhat
-        B[9:12, 3:6] = J_w_inv
+        # J_w_inv = rz(phi) @ Jinv @ rz(phi).T
+        # B[9:12, 0:3] = J_w_inv @ rhat
+        # B[9:12, 3:6] = J_w_inv
         G = np.zeros((n_x, 1))
         G[8, :] = -self.g
         self.A = A
@@ -100,7 +100,9 @@ class Mpc:
                            fz >= 0,
                            z <= 3,
                            z >= 0.3]
-        constr += [x[0, :] == x_in]  #, x[-1, :] == x_ref[-1, :]]  # initial and final condition
+
+        constr += [x[0, :] == x_in]  # initial condition
+        # constr += [x[-1, :] == x_ref[-1, :]]  # final condition
         # --- set up solver --- #
         problem = cp.Problem(cp.Minimize(cost), constr)
         problem.solve(solver=cp.ECOS)  # , verbose=True)

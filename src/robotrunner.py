@@ -48,7 +48,7 @@ class Runner:
         elif tool == 'casadi':
             mpc_tool = mpc_euler_cas
 
-        self.mpc = mpc_tool.Mpc(X_0=self.X_0, t=self.mpc_dt, N=self.N, Jinv=Jinv, rhat=rhat, m=self.m, g=self.g, mu=mu)
+        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, Jinv=Jinv, rhat=rhat, m=self.m, g=self.g, mu=mu)
         self.n_X = 13
         self.n_U = 6
 
@@ -140,8 +140,8 @@ class Runner:
 
     def gait_map(self, ts, t0):
         # generate vector of scheduled contact states over the mpc's prediction horizon
-        C = np.zeros(self.N + 1)
-        for k in range(0, (self.N + 1)):
+        C = np.zeros(self.N)
+        for k in range(0, self.N):
             C[k] = self.gait_scheduler(t=ts, t0=t0)
             ts += self.mpc_dt
         return C
