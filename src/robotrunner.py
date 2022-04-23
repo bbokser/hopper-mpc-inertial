@@ -19,12 +19,12 @@ class Runner:
         self.dyn = dyn
         self.dt = dt
         self.total_run = 5000
-        self.tol = 1e-3  # desired mpc tolerance
+        # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
                            [70089.52, 45477183.53, -87045.58],
                            [2067970.36, -87045.58, 76287220.47]])*1000  # g/mm2 to kg/m2
-        self.r = np.array([0.02201854, 6.80044366, 0.97499173]) * 1000  # mm to m
+        self.r = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
         rhat = hat(self.r)
         Jinv = np.linalg.inv(self.J)
         self.g = 9.807  # gravitational acceleration, m/s2
@@ -86,11 +86,11 @@ class Runner:
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
 
-        # plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
-        # plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3])
-        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::20, :])
+        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::50, 0:3])
+        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
 

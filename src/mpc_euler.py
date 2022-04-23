@@ -54,7 +54,8 @@ class Mpc:
         x = cp.Variable((N+1, n_x))
         u = cp.Variable((N, n_u))
         Q = np.eye(n_x)
-        R = np.eye(n_u)*0
+        Q[2] *= 0.01
+        R = np.eye(n_u)*0.1
         cost = 0
         constr = []
         u_ref = np.zeros(n_u)
@@ -82,6 +83,15 @@ class Mpc:
             fx = u[k, 0]
             fy = u[k, 1]
             fz = u[k, 2]
+            taux = u[k, 3]
+            tauy = u[k, 4]
+            tauz = u[k, 5]
+            constr += [taux <= 20,
+                       taux >= -20,
+                       tauy <= 20,
+                       tauy >= -20,
+                       tauz <= 4,
+                       tauz >= -4]
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)

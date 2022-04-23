@@ -16,25 +16,37 @@ plt.rcParams['font.size'] = 16
 
 
 def fplot(total, p_hist, f_hist, s_hist):
-    fig, axs = plt.subplots(5, sharex="all")
+    fig, axs = plt.subplots(8, sharex="all")
     plt.xlabel("Timesteps")
+    plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=1, hspace=0.7)
 
     axs[0].plot(range(total), p_hist[:, 2], color='blue')
     axs[0].set_title('Base z position w.r.t. time')
     axs[0].set_ylabel("Z position (m)")
 
     axs[1].plot(range(total), f_hist[:, 0], color='blue')
-    axs[1].set_title('Magnitude of X Output Force')
-    axs[1].set_ylabel("Force, N")
+    axs[1].set_title('X Output Force')
+    axs[1].set_ylabel("Force, N", rotation=0)
     axs[2].plot(range(total), f_hist[:, 1], color='blue')
-    axs[2].set_title('Magnitude of Y Output Force')
-    axs[2].set_ylabel("Force, N")
+    axs[2].set_title('Y Output Force')
+    axs[2].set_ylabel("Force, N", rotation=0)
     axs[3].plot(range(total), f_hist[:, 2], color='blue')
-    axs[3].set_title('Magnitude of Z Output Force')
-    axs[3].set_ylabel("Force, N")
-    axs[4].plot(range(total), s_hist, color='blue')
-    axs[4].set_title('Scheduled Contact')
-    axs[4].set_ylabel("True/False")
+    axs[3].set_title('Z Output Force')
+    axs[3].set_ylabel("Force, N", rotation=0)
+
+    axs[4].plot(range(total), f_hist[:, 3], color='blue')
+    axs[4].set_title('X-axis Torque')
+    axs[4].set_ylabel("Torque, Nm", rotation=0)
+    axs[5].plot(range(total), f_hist[:, 4], color='blue')
+    axs[5].set_title('Y-axis Torque')
+    axs[5].set_ylabel("Torque, Nm", rotation=0)
+    axs[6].plot(range(total), f_hist[:, 5], color='blue')
+    axs[6].set_title('Z-axis Torque')
+    axs[6].set_ylabel("Torque, Nm", rotation=0)
+
+    axs[7].plot(range(total), s_hist, color='blue')
+    axs[7].set_title('Scheduled Contact')
+    axs[7].set_ylabel("True/False", rotation=0)
 
     plt.show()
 
@@ -80,6 +92,9 @@ def posplot_animate(p_ref, p_hist):
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)")
+    ax.set_xlim3d(0, 2)
+    ax.set_ylim3d(0, 2)
+    ax.set_zlim3d(0, 2)
     # ax.plot(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], color='red', label='Body Position')
     ax.scatter(*p_hist[0, :], color='green', marker="x", s=200, label='Starting Position')
     ax.scatter(*p_ref, marker="x", s=200, color='orange', label='Target Position')
@@ -99,7 +114,7 @@ def posplot_animate(p_ref, p_hist):
     line = plt.plot(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], lw=2, c='g')[0]  # For line plot
 
     line_ani = animation.FuncAnimation(fig, animate_line, frames=n_data, fargs=(p_hist.T, line), interval=50, blit=False)
-    # line_ani.save(r'AnimationNew.mp4')
+    # line_ani.save('basic_animation.mp4', fps=30, bitrate=4000, extra_args=['-vcodec', 'libx264'])
 
     plt.show()
 
@@ -108,7 +123,6 @@ def animate_cube(N, pt_hist, points):
     """perform animation step"""
     for i in range(8):
         points[i]._offsets3d = (pt_hist[i][0:3, :N])
-    # return points
 
 
 def posplot_animate_cube(p_ref, X_hist):
@@ -164,5 +178,5 @@ def posplot_animate_cube(p_ref, X_hist):
 
     anim = animation.FuncAnimation(fig, animate_cube, frames=N, fargs=(p_hist, points), interval=0.1, blit=False)
     # line_ani.save(r'AnimationNew.mp4')
-    # anim.save('basic_animation.mp4', fps=30, bitrate=1000, extra_args=['-vcodec', 'libx264'])
+    # anim.save('basic_animation.mp4', fps=30, bitrate=4000, extra_args=['-vcodec', 'libx264'])
     plt.show()

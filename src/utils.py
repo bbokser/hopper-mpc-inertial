@@ -1,4 +1,5 @@
 import numpy as np
+import transforms3d
 
 H = np.zeros((4, 3))
 H[1:4, 0:4] = np.eye(3)
@@ -50,29 +51,19 @@ def rz(phi):
     return Rz
 
 
-def quat2euler(quat):
-    w, x, y, z = quat
-    y_sqr = y * y
+def quat2z(Q):
+    # get ZYX Z-axis euler angle from quaternion
+    return np.arctan2(Q[:, 1] * Q[:, 3] - Q[:, 2] * Q[:, 0], -(Q[:, 2] * Q[:, 3] + Q[:, 1] * Q[:, 0]))
 
-    t0 = +2.0 * (w * x + y * z)
-    t1 = +1.0 - 2.0 * (x * x + y_sqr)
-    X = np.arctan2(t0, t1)
 
-    t2 = +2.0 * (w * y - z * x)
-    t2 = +1.0 if t2 > +1.0 else t2
-    t2 = -1.0 if t2 < -1.0 else t2
-    Y = np.arcsin(t2)
-
-    t3 = +2.0 * (w * z + x * y)
-    t4 = +1.0 - 2.0 * (y_sqr + z * z)
-    Z = np.arctan2(t3, t4)
-
-    result = np.zeros(3)
-    result[0] = X
-    result[1] = Y
-    result[2] = Z
-
-    return result
+def quat2euler(Q):
+    # ZYX Euler angles, not tait-bryan? Output roll-pitch-yaw order # this is why euler angles suck ass
+    zyx = transforms3d.euler.quat2euler(Q, axes='rzyx')
+    xyz = np.zeros(3)
+    xyz[0] = zyx[2]
+    xyz[1] = zyx[1]
+    xyz[2] = zyx[0]
+    return xyz
 
 
 def convert(X_in):
