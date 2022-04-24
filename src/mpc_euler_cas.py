@@ -6,48 +6,41 @@ import numpy as np
 import casadi as cs
 import itertools
 
-from utils import rz, quat2euler
+from utils import rz, hat
 
 
 class Mpc:
 
-    def __init__(self, t, N, Jinv, rhat, m, g, mu, **kwargs):
+    def __init__(self, t, N, Jinv, rh, m, g, mu, **kwargs):
         n_x = 12  # number of states
         n_u = 6  # number of controls
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
         self.Jinv = Jinv
-        self.rhat = rhat
+        self.rhat = rh
         self.m = m  # kg
         self.g = g
         self.mu = mu
 
         A = cs.SX.zeros(n_x, n_x)
         A[0:3, 6:9] = np.eye(3)
-        # phi = quat2euler(X_0[3:7])[2]  # extract z-axis euler angle
-        # rz_phi = rz(phi)
-        # A[3:6, 9:] = rz_phi
         B = cs.SX.zeros(n_x, n_u)
         B[6:9, 0:3] = np.eye(3) / self.m
-        # J_w_inv = rz_phi @ Jinv @ rz_phi.T
-        # B[9:12, 0:3] = J_w_inv @ rhat
-        # B[9:12, 3:6] = J_w_inv
         G = cs.SX.zeros(n_x, 1)
         G[8] = -self.g
 
-        C_in = cs.SX.sym('C', n_x, N)
         rz_phi_in = cs.SX.sym('rz_phi', n_x, 3)
         x_p = cs.SX.sym('x_p', n_x, (N + 1))  # params: x_in, x_ref
         x = cs.SX.sym('x', n_x, (N + 1))  # represents the states over the opt problem.
         u = cs.SX.sym('u', n_u, N)  # decision variables, control action matrix
-
-        C = C_in[0, :]  # awkwardly pull C out of larger array (rest should be zeros)
-
         rz_phi = rz_phi_in[0:3, :].T  # awkwardly pull rz_phi out of larger array (rest should be zeros)
         A[3:6, 9:] = rz_phi
         J_w_inv = rz_phi @ Jinv @ rz_phi.T
+        rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be a param
+        # rhat = hat(rh + rz_phi.T @ rf)  # TODO: Won't work unless you create a cs.hat
+        rhat = hat(rh + rf)
         B[9:12, 0:3] = J_w_inv @ rhat
-        B[9:12, 3:] = J_w_inv
+        B[9:12, 3:] = J_w_inv @ rz_phi.T
         A_bar = cs.horzcat(cs.horzcat(A, B), G)
         A_bar = cs.vertcat(A_bar, np.zeros((n_u + 1, n_x + n_u + 1)))
         I_bar = np.eye(n_x + n_u + 1)
@@ -74,14 +67,13 @@ class Mpc:
             uk = u[:, k]  # control action
             u_refk = m * g * 2
             # calculate objective
-            obj = obj + cs.mtimes(cs.mtimes((xk - x_refk).T, Q), xk - x_refk) \
-                + cs.mtimes(cs.mtimes((uk - u_refk).T, R), uk - u_refk)
-            dyn = cs.mtimes(Ad, xk) + cs.mtimes(Bd, uk) + Gd
+            obj = obj + (xk - x_refk).T @ Q @ (xk - x_refk) + (uk - u_refk).T @ R @ (uk - u_refk)
+            dyn = Ad @ xk + Bd @ uk + Gd
             constr_dyn = cs.vertcat(constr_dyn, x[:, k + 1] - dyn)  # compute constraints
-            constr_fricx1 = cs.vertcat(constr_fricx1, (uk[0] - mu * uk[2]) * C[k])   # fx - mu*fz
-            constr_fricx2 = cs.vertcat(constr_fricx2, (-uk[0] - mu * uk[2]) * C[k])  # fx - mu*fz
-            constr_fricy1 = cs.vertcat(constr_fricx1, (uk[1] - mu * uk[2]) * C[k])  # fx - mu*fz
-            constr_fricy2 = cs.vertcat(constr_fricx1, (-uk[1] - mu * uk[2]) * C[k])  # fx - mu*fz
+            constr_fricx1 = cs.vertcat(constr_fricx1, (uk[0] - mu * uk[2]))   # fx - mu*fz
+            constr_fricx2 = cs.vertcat(constr_fricx2, (-uk[0] - mu * uk[2]))  # fx - mu*fz
+            constr_fricy1 = cs.vertcat(constr_fricx1, (uk[1] - mu * uk[2]))  # fx - mu*fz
+            constr_fricy2 = cs.vertcat(constr_fricx1, (-uk[1] - mu * uk[2]))  # fx - mu*fz
 
         # append them
         constr = []
@@ -93,7 +85,7 @@ class Mpc:
         constr = cs.vertcat(constr, constr_fricy2)
 
         opt_variables = cs.vertcat(cs.reshape(x, n_x * (N + 1), 1), cs.reshape(u, n_u * N, 1))
-        params = cs.vertcat(x_p.T, rz_phi_in.T, C_in.T)
+        params = cs.vertcat(x_p.T, rz_phi_in.T)
         qp = {'x': opt_variables, 'f': obj, 'g': constr, 'p': params}
         opts = {'print_time': 0, 'error_on_fail': 0, 'printLevel': "none", 'boundTolerance': 1e-6,
                 'terminationTolerance': 1e-6}
@@ -117,7 +109,7 @@ class Mpc:
         self.ubx = ubx
         self.lbx = lbx
 
-    def mpcontrol(self, x_in, x_ref_in, C):
+    def mpcontrol(self, x_in, x_ref_in, rf, C):
         N = self.N
         n_x = self.n_x
         n_u = self.n_u
@@ -131,22 +123,21 @@ class Mpc:
         ubfz = ([200] * N) * C
         lbfx = ([-200] * N) * C
         lbfy = ([-200] * N) * C
-        lbfz = ([0] * N) * C
-
         ubx[(n_x * (N + 1) + 0)::n_u] = ubfx  # upper bound on all f_x
         ubx[(n_x * (N + 1) + 1)::n_u] = ubfy  # upper bound on all f_y
         ubx[(n_x * (N + 1) + 2)::n_u] = ubfz  # upper bound on all f_z
-
         lbx[(n_x * (N + 1) + 0)::n_u] = lbfx  # lower bound on all f_x
         lbx[(n_x * (N + 1) + 1)::n_u] = lbfy  # lower bound on all f_y
+        ubfz = ([400] * N) * C
+        lbfz = ([0] * N)
+        ubx[(n_x * (N + 1) + 2)::n_u] = ubfz  # upper bound on all f_z
         lbx[(n_x * (N + 1) + 2)::n_u] = lbfz  # lower bound on all f_z
 
         u0 = np.zeros((N, n_u))  # six control inputs
         x0_init = np.tile(x_in, (1, N + 1)).T  # initialization of the state's decision variables
 
-        C_in = cs.vertcat(C.reshape(1, -1), np.zeros((n_x-1, N)))
         rz_phi_in = cs.horzcat(rz(x_in[5]), np.zeros((3, n_x-3)))
-        parameters = cs.horzcat(x_in, x_ref_in.T, rz_phi_in.T, C_in).T  # set values of parameters vector
+        parameters = cs.horzcat(x_in, x_ref_in.T, rz_phi_in.T).T  # set values of parameters vector
         # init value of optimization variables
         x0 = cs.vertcat(np.reshape(x0_init.T, (n_x * (N + 1), 1)), np.reshape(u0.T, (n_u * N, 1)))
 

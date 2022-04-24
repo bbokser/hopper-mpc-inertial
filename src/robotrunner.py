@@ -18,19 +18,18 @@ class Runner:
     def __init__(self, tool='cvxpy', dyn='euler', dt=1e-3):
         self.dyn = dyn
         self.dt = dt
-        self.total_run = 5000
+        self.total_run = 2000
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
                            [70089.52, 45477183.53, -87045.58],
-                           [2067970.36, -87045.58, 76287220.47]])*1000  # g/mm2 to kg/m2
-        self.r = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
-        rhat = hat(self.r)
+                           [2067970.36, -87045.58, 76287220.47]])*(10**(-9))  # g/mm2 to kg/m2
         Jinv = np.linalg.inv(self.J)
+        self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # gait period, seconds
         self.phi_switch = 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 20  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
         self.mpc_dt = 0.05  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
@@ -48,7 +47,7 @@ class Runner:
         elif tool == 'casadi':
             mpc_tool = mpc_euler_cas
 
-        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, Jinv=Jinv, rhat=rhat, m=self.m, g=self.g, mu=mu)
+        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, Jinv=Jinv, rh=self.rh, m=self.m, g=self.g, mu=mu)
         self.n_X = 13
         self.n_U = 6
 
@@ -64,9 +63,9 @@ class Runner:
         f_hist = np.zeros((total, self.n_U))
         s_hist = np.zeros(total)
         U = np.zeros(self.n_U)
-        pf_ref = np.zeros((total, self.n_U))
-        f_pred_hist = np.zeros((total, self.n_U))
-        p_pred_hist = np.zeros((total, self.n_U))
+        # pf_ref = np.zeros((total, self.n_U))
+        # f_pred_hist = np.zeros((total, self.n_U))
+        # p_pred_hist = np.zeros((total, self.n_U))
         for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
@@ -78,7 +77,8 @@ class Runner:
                 x_in = convert(X_traj[k, :])  # convert to mpc states
                 x_ref = self.path_plan(x_in=x_in, xf=convert(self.X_f))
                 x_refN = x_ref[::int(mpc_factor)]
-                U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refN, C=C)
+                rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
+                U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refN, rf=rf, C=C)
 
             mpc_counter += 1
             f_hist[k, :] = U  # * s  # take first timestep
@@ -90,7 +90,7 @@ class Runner:
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::50, 0:3])
-        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
+        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
 
