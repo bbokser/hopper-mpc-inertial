@@ -58,7 +58,7 @@ def quat2z(Q):
 
 def quat2euler(Q):
     # ZYX Euler angles, not tait-bryan? Output roll-pitch-yaw order # this is why euler angles suck ass
-    zyx = transforms3d.euler.quat2euler(Q, axes='rzyx')
+    zyx = transforms3d.euler.quat2euler(Q, axes='rzyx')  # Intro to Robotics, Mechanics and Control p. 44
     xyz = np.zeros(3)
     xyz[0] = zyx[2]
     xyz[1] = zyx[1]
@@ -68,15 +68,14 @@ def quat2euler(Q):
 
 def convert(X_in):
     # convert from simulator states to mpc states (SE3 to euler)
-    X0 = np.zeros(12)
-    X0[0:3] = X_in[0:3]
+    x0 = np.zeros(12)
+    x0[0:3] = X_in[0:3]
     q = X_in[3:7]
-    X0[3:6] = quat2euler(q)  # q -> euler
+    x0[3:6] = quat2euler(q)  # q -> euler
     Q = L(q) @ R(q).T
-    X0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
-    X0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
-    # X0[9:] = X_in[10:13]  # body frame w -> world frame w
-    return X0
+    x0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
+    x0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
+    return x0
 
 
 def quat2rot(Q):

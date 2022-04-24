@@ -46,7 +46,7 @@ class Mpc:
         rh = self.rh
         n_x = self.n_x
         n_u = self.n_u
-
+        # print(x_in - x_ref_in[0, :])
         x = cp.Variable((N+1, n_x))
         u = cp.Variable((N, n_u))
         # TODO: Make Rz_phi a param instead of setting up the problem on every run
@@ -66,7 +66,7 @@ class Mpc:
         Gd = M[0:n_x, -1]
 
         Q = np.eye(n_x)
-        np.fill_diagonal(Q, [1., 1., 1., 2., 2., 2., 1., 1., 1., 1., 1., 1.])
+        np.fill_diagonal(Q, [2., 2., 2., 1., 1., 5., 1., 1., 1., 1., 1., 5.])
         R = np.eye(n_u)
         np.fill_diagonal(R, [0.001, 0.001, 0.001, 0.001, 0.001, 0.001])
         u_ref = np.zeros(n_u)
@@ -83,14 +83,14 @@ class Mpc:
             taux = u[k, 3]
             tauy = u[k, 4]
             tauz = u[k, 5]
-            '''
+
             constr += [taux <= 20,
                        taux >= -20,
                        tauy <= 20,
                        tauy >= -20,
                        tauz <= 4,
                        tauz >= -4]
-            '''
+
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
@@ -106,8 +106,9 @@ class Mpc:
                            0 >= -fx - mu * fz,
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
-                           fz >= 0] #,  # TODO: Calculate max vertical force
-                           # z >= 0.2,
+                           fz >= 0,
+                           fz <= m * g * 4,  # TODO: Calculate max vertical force
+                           z >= 0.1]
                            # z <= 3]
 
         constr += [x[0, :] == x_in]  # initial condition

@@ -29,9 +29,9 @@ class Runner:
         self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 1.6  # 0.8 gait period, seconds
-        self.phi_switch = 0.347  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
-        self.mpc_dt = 0.05  # mpc sampling time (s), needs to be a factor of N
+        self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
+        self.N = 60  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.mpc_dt = 0.02  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
         self.N_k = int(self.N * self.mpc_factor)  # total mpc prediction horizon length (low-level timesteps)
@@ -39,8 +39,8 @@ class Runner:
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
-        self.X_0 = np.array([0, 0, 0.2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([0, 0, 0.2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
+        self.X_f = np.hstack([1, 1, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -108,7 +108,7 @@ class Runner:
         plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
-        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::50, 0:3], ref_traj=x_ref[::mpc_factor, 0:3])
+        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3], ref_traj=x_ref[::mpc_factor, 0:3])
         plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
