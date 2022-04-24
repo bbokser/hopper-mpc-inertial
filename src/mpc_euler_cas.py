@@ -36,7 +36,7 @@ class Mpc:
         rz_phi = rz_phi_in[0:3, :].T  # awkwardly pull rz_phi out of larger array (rest should be zeros)
         A[3:6, 9:] = rz_phi
         J_w_inv = rz_phi @ Jinv @ rz_phi.T
-        rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be a param
+        rf = np.array([0, 0, -0.2])  # body frame foot position TODO: Needs to be a param
         # rhat = hat(rh + rz_phi.T @ rf)  # TODO: Won't work unless you create a cs.hat
         rhat = hat(rh + rf)
         B[9:12, 0:3] = J_w_inv @ rhat

@@ -74,8 +74,8 @@ def convert(X_in):
     X0[3:6] = quat2euler(q)  # q -> euler
     Q = L(q) @ R(q).T
     X0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
-    # X0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
-    X0[9:] = X_in[10:13]  # body frame w -> world frame w
+    X0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
+    # X0[9:] = X_in[10:13]  # body frame w -> world frame w
     return X0
 
 
