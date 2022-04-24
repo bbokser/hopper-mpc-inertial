@@ -145,8 +145,8 @@ class Mpc:
 
         solu = np.array(sol['x'][n_x * (N + 1):])
         # u = np.reshape(solu.T, (n_u, N)).T  # get controls from the solution
-        u = np.reshape(solu.T, (N, n_u)).T  # get controls from the solution
+        u = np.reshape(solu.T, (N, n_u))  # get controls from the solution
         # ss_error = np.linalg.norm(x0 - x_ref)  # defaults to Euclidean norm
         # print("ss_error = ", ss_error)
 
-        return u[:, 0]
+        return u  # [0, :]

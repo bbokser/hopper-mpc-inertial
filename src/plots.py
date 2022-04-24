@@ -84,7 +84,7 @@ def animate_line(num, dataSet, line):
     return line
 
 
-def posplot_animate(p_ref, p_hist):
+def posplot_animate(p_ref, p_hist, ref_traj):
     fig = plt.figure()
     ax = Axes3D(fig)
     # ax = plt.axes(projection='3d')
@@ -95,7 +95,7 @@ def posplot_animate(p_ref, p_hist):
     ax.set_xlim3d(0, 2)
     ax.set_ylim3d(0, 2)
     ax.set_zlim3d(0, 2)
-    # ax.plot(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], color='red', label='Body Position')
+    ax.plot(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], color='red', label='Reference Trajectory')
     ax.scatter(*p_hist[0, :], color='green', marker="x", s=200, label='Starting Position')
     ax.scatter(*p_ref, marker="x", s=200, color='orange', label='Target Position')
     ax.legend()

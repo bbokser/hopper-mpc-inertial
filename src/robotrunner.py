@@ -18,7 +18,6 @@ class Runner:
     def __init__(self, tool='cvxpy', dyn='euler', dt=1e-3):
         self.dyn = dyn
         self.dt = dt
-        self.total_run = 2000
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
@@ -27,19 +26,20 @@ class Runner:
         Jinv = np.linalg.inv(self.J)
         self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
         self.g = 9.807  # gravitational acceleration, m/s2
-        self.t_p = 0.8  # gait period, seconds
+        self.t_p = 1  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
         self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
         self.mpc_dt = 0.05  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
-        self.N_k = self.N * self.mpc_factor  # total mpc prediction horizon length (timesteps)
+        self.N_k = self.N * self.mpc_factor  # total mpc prediction horizon length (low-level timesteps)
+
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
-        self.X_0 = np.array([0, 0, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([2, 2, 0.7, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
-        mu = 0.3  # coeff of friction
+        self.X_0 = np.array([0, 0, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
+        self.X_f = np.hstack([0, 0, 0.5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        mu = 1  # coeff of friction
 
         mpc_tool = None
         if tool == 'cvxpy':
@@ -50,6 +50,11 @@ class Runner:
         self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, Jinv=Jinv, rh=self.rh, m=self.m, g=self.g, mu=mu)
         self.n_X = 13
         self.n_U = 6
+        self.ctrl = "closed"
+        if self.ctrl == "open":
+            self.total_run = int(self.N * self.mpc_factor)
+        else:
+            self.total_run = 5000
 
     def run(self):
         total = self.total_run + 1  # number of timesteps to plot
@@ -63,25 +68,40 @@ class Runner:
         f_hist = np.zeros((total, self.n_U))
         s_hist = np.zeros(total)
         U = np.zeros(self.n_U)
+        j = int(self.mpc_factor)
         # pf_ref = np.zeros((total, self.n_U))
         # f_pred_hist = np.zeros((total, self.n_U))
         # p_pred_hist = np.zeros((total, self.n_U))
+        x_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
+
         for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
             s = self.gait_scheduler(t, t0)
+            if self.ctrl == 'closed':
+                if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
+                    mpc_counter = 0  # restart the mpc counter
+                    C = self.gait_map(t, t0)
+                    x_refk = self.path_plan_grab(x_ref=x_ref, k=k)  # TODO: Adaptive path planner
 
-            if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
-                mpc_counter = 0  # restart the mpc counter
-                C = self.gait_map(t, t0)
-                x_in = convert(X_traj[k, :])  # convert to mpc states
-                x_ref = self.path_plan(x_in=x_in, xf=convert(self.X_f))
-                x_refN = x_ref[::int(mpc_factor)]
-                rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
-                U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refN, rf=rf, C=C)
+                    x_in = convert(X_traj[k, :])  # convert to mpc states
+                    rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, rf=rf, C=C)
 
-            mpc_counter += 1
-            f_hist[k, :] = U  # * s  # take first timestep
+                mpc_counter += 1
+                f_hist[k, :] = U[0, :]  # * s  # take first timestep
+
+            else:  # Open loop traj opt, this will fail if total != mpc_factor
+                if int(total/self.N) != mpc_factor:
+                    print("ERROR: Incorrect settings", total/self.N, mpc_factor)
+                if k == 0:
+                    C = self.gait_map(t, t0)
+                    x_refk = x_ref
+                    x_in = convert(X_traj[k, :])  # convert to mpc states
+                    rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, rf=rf, C=C)
+                    for i in range(0, self.N):
+                        f_hist[int(i*j):int(i*j+j), :] = list(itertools.repeat(U[i, :], j))
 
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
@@ -89,7 +109,8 @@ class Runner:
         plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
-        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::50, 0:3])
+
+        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::50, 0:3], ref_traj=x_ref[:, 0:3])
         plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
@@ -145,29 +166,34 @@ class Runner:
             ts += self.mpc_dt
         return C
 
-    def path_plan(self, x_in, xf):
+    def path_plan_init(self, x_in, xf):
         # Path planner--generate reference trajectory in MPC state space!!!
-        dt = self.dt
-        t_mpc = int(self.N_k)  # length of MPC horizon in ts TODO: Perhaps N should vary wrt time?
-        t_e = np.linalg.norm(xf[0:2] - x_in[0:2]) * 2000  # expected required time to reach target
-        if t_mpc < t_e:
-            t_ref = t_mpc
-            per = 1 - (t_e - t_mpc)/t_e  # percent of the expected time the mpc actually has
-            xf[0:2] = x_in[0:2] + (xf[0:2] - x_in[0:2]) * per  # interpolate new xf and yf based on allotted time
-        else:
-            t_ref = int(t_e)
-        # print(x_in[0:3], xf[0:3])
+        dt = self.mpc_dt
+        t_ref = int(self.total_run * self.dt / self.mpc_dt)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
+        lam = 6  # wavelength
+        v = lam/self.t_p  # wavelength over period
+        x_ref[:, 2] = [x_in[2] + 0.4 + 0.4*np.sin(2*np.pi/lam*(v*i*dt)+np.pi*3/2) for i in range(0, np.shape(x_ref)[0])]
         # interpolate linear velocities
         x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
 
-        if t_mpc == t_ref:
-            pass
-        elif t_ref == 0:
-            x_ref = np.array(list(itertools.repeat(xf, int(t_mpc))))
-        else:
-            x_ref = np.vstack((x_ref, list(itertools.repeat(xf, int(t_mpc - t_ref)))))
-
         return x_ref
+
+    def path_plan_grab(self, x_ref, k):
+        # Grab appropriate timesteps of pre-planned trajectory for mpc
+        t_mpc = int(self.N)  # length of MPC horizon in ts
+        t_left = np.shape(x_ref[k:, :])[0]  # number of remaining timesteps in the plan
+        print("t_mpc = ", t_mpc)
+        print("t_left = ", t_left)  # TODO: THIS IS WRONG!!!!
+        xf = x_ref[-1, :]
+        if t_mpc < t_left:
+            x_refk = x_ref[k:(k+self.N), :]
+        elif t_left == 0:
+            x_refk = np.array(list(itertools.repeat(xf, int(t_mpc))))
+        else:
+            x_refk = x_ref[k:, :]
+            x_refk = np.vstack((x_refk, list(itertools.repeat(xf, int(t_mpc - t_left)))))
+
+        return x_refk
