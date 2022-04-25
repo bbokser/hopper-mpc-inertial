@@ -40,7 +40,7 @@ class Runner:
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([1, 1, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([2, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -121,7 +121,7 @@ class Runner:
         J = self.J
         p = X[0:3]  # W frame
         q = X[3:7]  # B to N
-        q = q/np.linalg.norm(q)
+        # q = q/np.linalg.norm(q)
         v = X[7:10]  # B frame
         w = X[10:13]  # B frame
         F = U[0:3]  # W frame

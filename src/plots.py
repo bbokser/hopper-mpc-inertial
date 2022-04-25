@@ -78,11 +78,10 @@ def posplot(p_ref, p_hist, p_pred_hist, f_pred_hist, pf_hist):
     plt.show()
 
 
-def animate_line(N, dataSet1, dataSet2, line, ref):
+def animate_line(N, dataSet1, dataSet2, line, ref, ax):
     line._offsets3d = (dataSet1[0:3, :N])
     ref._offsets3d = (dataSet2[0:3, :N])
-    line.set_label('CoM Position')
-    ref.set_label('Reference Trajectory')
+    # ax.view_init(elev=10., azim=N)
 
 
 def posplot_animate(p_ref, p_hist, ref_traj):
@@ -99,7 +98,6 @@ def posplot_animate(p_ref, p_hist, ref_traj):
     # ax.plot(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], color='red', label='Reference Trajectory')
     ax.scatter(*p_hist[0, :], color='green', marker="x", s=200, label='Starting Position')
     ax.scatter(*p_ref, marker="x", s=200, color='orange', label='Target Position')
-    ax.legend()
     intervals = 2
     loc = plticker.MultipleLocator(base=intervals)
     ax.xaxis.set_minor_locator(loc)
@@ -114,7 +112,8 @@ def posplot_animate(p_ref, p_hist, ref_traj):
     N = len(p_hist)
     line = ax.scatter(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], lw=2, c='r', label='CoM Position')  # For line plot
     ref = ax.scatter(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], lw=2, c='g', label='Reference Trajectory')
-    line_ani = animation.FuncAnimation(fig, animate_line, frames=N, fargs=(p_hist.T, ref_traj.T, line, ref),
+    ax.legend()
+    line_ani = animation.FuncAnimation(fig, animate_line, frames=N, fargs=(p_hist.T, ref_traj.T, line, ref, ax),
                                        interval=1, blit=False)
     # line_ani.save('basic_animation.mp4', fps=30, bitrate=4000, extra_args=['-vcodec', 'libx264'])
 

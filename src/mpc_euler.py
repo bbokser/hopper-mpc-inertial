@@ -51,7 +51,7 @@ class Mpc:
         u = cp.Variable((N, n_u))
         # TODO: Make Rz_phi a param instead of setting up the problem on every run
         rz_phi = rz(x_in[5])
-        rhat = hat(rh + rz_phi.T @ rf)
+        rhat = hat(rz_phi.T @ (rh + rf))  # world frame vector from CoM to foot position
         A[3:6, 9:] = rz_phi
         J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
         # J_w_inv = np.linalg.inv(rz_phi @ J @ rz_phi.T)  # world frame Jinv
@@ -66,7 +66,7 @@ class Mpc:
         Gd = M[0:n_x, -1]
 
         Q = np.eye(n_x)
-        np.fill_diagonal(Q, [2., 2., 2., 1., 1., 5., 1., 1., 1., 1., 1., 5.])
+        np.fill_diagonal(Q, [10., 10., 2., 1., 1., 2., 1., 1., 1., 1., 1., 2.])
         R = np.eye(n_u)
         np.fill_diagonal(R, [0.001, 0.001, 0.001, 0.001, 0.001, 0.001])
         u_ref = np.zeros(n_u)
@@ -74,7 +74,7 @@ class Mpc:
         cost = 0
         constr = []
         for k in range(0, N):
-            kf = 10 if k == N - 1 else 1  # terminal cost
+            kf = 100 if k == N - 1 else 1  # terminal cost
             kuf = 0 if k == N - 1 else 1  # terminal cost
             z = x[k, 2]
             fx = u[k, 0]
@@ -108,7 +108,8 @@ class Mpc:
                            0 >= -fy - mu * fz,
                            fz >= 0,
                            fz <= m * g * 4,  # TODO: Calculate max vertical force
-                           z >= 0.1]
+                           z >= 0.1]  #,  # body frame fy = 0
+                           # np.array([0, 1, 0]) @ rz_phi @ x[k, 6:9].T == 0]  # body frame y velocity should be zero
                            # z <= 3]
 
         constr += [x[0, :] == x_in]  # initial condition
