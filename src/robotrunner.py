@@ -40,7 +40,7 @@ class Runner:
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([2, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([0.8, 0.8, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -170,7 +170,8 @@ class Runner:
         # dt = self.mpc_dt
         # t_ref = int(self.total_run * self.dt / self.mpc_dt)
         dt = self.dt
-        t_ref = int(self.total_run)
+        t_sit = int(2000)
+        t_ref = int(self.total_run - t_sit)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
         amp = 1  # 1.2
@@ -180,6 +181,10 @@ class Runner:
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
 
+        # sit at the goal
+        x_ref = np.vstack((x_ref, list(itertools.repeat(xf, t_sit))))
+        x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp + amp * np.sin(2 * np.pi / period * (i * dt)) for i in
+                       range(0, t_sit)]
         return x_ref
 
     def path_plan_grab(self, x_ref, k):

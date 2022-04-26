@@ -114,7 +114,7 @@ def posplot_animate(p_ref, p_hist, ref_traj):
     ref = ax.scatter(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], lw=2, c='g', label='Reference Trajectory')
     ax.legend()
     line_ani = animation.FuncAnimation(fig, animate_line, frames=N, fargs=(p_hist.T, ref_traj.T, line, ref, ax),
-                                       interval=1, blit=False)
+                                       interval=2, blit=False)
     # line_ani.save('basic_animation.mp4', fps=30, bitrate=4000, extra_args=['-vcodec', 'libx264'])
 
     plt.show()
