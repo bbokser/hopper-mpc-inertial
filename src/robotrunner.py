@@ -28,9 +28,9 @@ class Runner:
         Jinv = np.linalg.inv(self.J)
         self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
         self.g = 9.807  # gravitational acceleration, m/s2
-        self.t_p = 1.6  # 0.8 gait period, seconds
+        self.t_p = 0.8  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 60  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
         self.mpc_dt = 0.02  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
@@ -39,8 +39,11 @@ class Runner:
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
+        # self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
+        # self.X_f = np.hstack([2, 2, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+
         self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([0.8, 0.8, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([2, 2, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -97,7 +100,7 @@ class Runner:
                     C = self.gait_map(t, t0)
                     x_refk = x_ref
                     x_in = convert(X_traj[k, :])  # convert to mpc states
-                    rf = np.array([0, 0, -0.2])  # body frame foot position TODO: Needs to be legit in real setup
+                    rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
                     U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, rf=rf, C=C)
                     for i in range(0, self.N):
                         f_hist[int(i*j):int(i*j+j), :] = list(itertools.repeat(U[i, :], j))
@@ -105,11 +108,11 @@ class Runner:
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
 
-        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3], ref_traj=x_ref[::mpc_factor, 0:3])
-        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
+        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
 
@@ -170,21 +173,22 @@ class Runner:
         # dt = self.mpc_dt
         # t_ref = int(self.total_run * self.dt / self.mpc_dt)
         dt = self.dt
-        t_sit = int(2000)
+        t_sit = int(500)  # timesteps spent "sitting" at goal
         t_ref = int(self.total_run - t_sit)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
-        amp = 1  # 1.2
-        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+np.pi*3/2) for i in range(0, np.shape(x_ref)[0])]
+        amp = self.t_p/4  # 0.2  # 1.2
+        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+np.pi*2/2) for i in range(0, np.shape(x_ref)[0])]
         # interpolate linear velocities
         x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
 
         # sit at the goal
-        x_ref = np.vstack((x_ref, list(itertools.repeat(xf, t_sit))))
-        x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp + amp * np.sin(2 * np.pi / period * (i * dt)) for i in
-                       range(0, t_sit)]
+        if t_sit != 0:
+            x_ref = np.vstack((x_ref, list(itertools.repeat(xf, t_sit))))
+            x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp + amp * np.sin(2 * np.pi / period * (i * dt)) for i in
+                           range(0, t_sit)]
         return x_ref
 
     def path_plan_grab(self, x_ref, k):

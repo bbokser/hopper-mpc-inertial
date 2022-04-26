@@ -22,31 +22,31 @@ def fplot(total, p_hist, f_hist, s_hist):
 
     axs[0].plot(range(total), p_hist[:, 2], color='blue')
     axs[0].set_title('Base z position w.r.t. time')
-    axs[0].set_ylabel("Z pos (m)", rotation=0)
+    axs[0].set_ylabel("Z pos (m)")
 
     axs[1].plot(range(total), f_hist[:, 0], color='blue')
     axs[1].set_title('X Output Force')
-    axs[1].set_ylabel("N", rotation=0)
+    axs[1].set_ylabel("N")
     axs[2].plot(range(total), f_hist[:, 1], color='blue')
     axs[2].set_title('Y Output Force')
-    axs[2].set_ylabel("N", rotation=0)
+    axs[2].set_ylabel("N")
     axs[3].plot(range(total), f_hist[:, 2], color='blue')
     axs[3].set_title('Z Output Force')
-    axs[3].set_ylabel("N", rotation=0)
+    axs[3].set_ylabel("N")
 
     axs[4].plot(range(total), f_hist[:, 3], color='blue')
     axs[4].set_title('X-axis Torque')
-    axs[4].set_ylabel("Nm", rotation=0)
+    axs[4].set_ylabel("Nm")
     axs[5].plot(range(total), f_hist[:, 4], color='blue')
     axs[5].set_title('Y-axis Torque')
-    axs[5].set_ylabel("Nm", rotation=0)
+    axs[5].set_ylabel("Nm")
     axs[6].plot(range(total), f_hist[:, 5], color='blue')
     axs[6].set_title('Z-axis Torque')
-    axs[6].set_ylabel("Nm", rotation=0)
+    axs[6].set_ylabel("Nm")
 
     axs[7].plot(range(total), s_hist, color='blue')
     axs[7].set_title('Scheduled Contact')
-    axs[7].set_ylabel("Truth", rotation=0)
+    axs[7].set_ylabel("Truth")
 
     plt.show()
 
@@ -81,7 +81,7 @@ def posplot(p_ref, p_hist, p_pred_hist, f_pred_hist, pf_hist):
 def animate_line(N, dataSet1, dataSet2, line, ref, ax):
     line._offsets3d = (dataSet1[0:3, :N])
     ref._offsets3d = (dataSet2[0:3, :N])
-    # ax.view_init(elev=10., azim=N)
+    ax.view_init(elev=10., azim=N)
 
 
 def posplot_animate(p_ref, p_hist, ref_traj):
