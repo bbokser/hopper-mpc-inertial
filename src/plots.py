@@ -84,7 +84,7 @@ def animate_line(N, dataSet1, dataSet2, line, ref, ax):
     ax.view_init(elev=10., azim=N)
 
 
-def posplot_animate(p_ref, p_hist, ref_traj):
+def posplot_animate(p_ref, p_hist, ref_traj, pf_ref):
     fig = plt.figure()
     ax = Axes3D(fig)
     # ax = plt.axes(projection='3d')
@@ -95,7 +95,7 @@ def posplot_animate(p_ref, p_hist, ref_traj):
     ax.set_xlim3d(0, 2)
     ax.set_ylim3d(0, 2)
     ax.set_zlim3d(0, 2)
-    # ax.plot(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], color='red', label='Reference Trajectory')
+    ax.scatter(pf_ref[:, 0], pf_ref[:, 1], pf_ref[:, 2], color='blue', label='Planned Footsteps')
     ax.scatter(*p_hist[0, :], color='green', marker="x", s=200, label='Starting Position')
     ax.scatter(*p_ref, marker="x", s=200, color='orange', label='Target Position')
     intervals = 2

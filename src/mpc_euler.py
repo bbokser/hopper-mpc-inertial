@@ -108,7 +108,7 @@ class Mpc:
                            0 >= -fy - mu * fz,
                            fz >= 0,
                            fz <= m * g * 4,  # TODO: Calculate max vertical force
-                           z >= 0.1]  #,  # body frame fy = 0
+                           z >= 0.1] # ,  # body frame fy = 0
                            # np.array([0, 1, 0]) @ rz_phi @ x[k, 6:9].T == 0]  # body frame y velocity should be zero
                            # z <= 3]
 
