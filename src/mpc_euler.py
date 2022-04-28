@@ -10,60 +10,26 @@ from scipy.linalg import expm
 
 class Mpc:
 
-    def __init__(self, t, N, Jinv, rh, m, g, mu, **kwargs):
-        n_x = 12  # number of states
-        n_u = 6  # number of controls
+    def __init__(self, n_x, n_u, t, N, m, g, mu, **kwargs):
         self.t = t  # sampling time (s)
         self.N = N  # prediction horizon
-        self.Jinv = Jinv
-        self.rh = rh
         self.m = m  # kg
         self.g = g
         self.mu = mu
-        A = np.zeros((n_x, n_x))
-        A[0:3, 6:9] = np.eye(3)
-        B = np.zeros((n_x, n_u))
-        B[6:9, 0:3] = np.eye(3) / self.m
-        G = np.zeros((n_x, 1))
-        G[8, :] = -self.g
-        self.A = A
-        self.B = B
-        self.G = G
         self.n_x = n_x
         self.n_u = n_u
 
-    def mpcontrol(self, x_in, x_ref_in, rf, C):
+    def mpcontrol(self, x_in, x_ref_in, Ad, Bd, Gk, C):
         x_ref = x_ref_in
         N = self.N
-        t = self.t
         m = self.m
         g = self.g
         mu = self.mu
-        A = self.A
-        B = self.B
-        G = self.G
-        Jinv = self.Jinv
-        rh = self.rh
         n_x = self.n_x
         n_u = self.n_u
         # print(x_in - x_ref_in[0, :])
         x = cp.Variable((N+1, n_x))
         u = cp.Variable((N, n_u))
-        # TODO: Make Rz_phi a param instead of setting up the problem on every run
-        rz_phi = rz(x_in[5])
-        rhat = hat(rz_phi.T @ (rh + rf))  # world frame vector from CoM to foot position
-        A[3:6, 9:] = rz_phi
-        J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
-        # J_w_inv = np.linalg.inv(rz_phi @ J @ rz_phi.T)  # world frame Jinv
-        B[9:12, 0:3] = J_w_inv @ rhat
-        B[9:12, 3:] = J_w_inv @ rz_phi.T
-        A_bar = np.vstack((np.hstack((A, B, G)), np.zeros((n_u + 1, n_x + n_u + 1))))
-        I_bar = np.eye(n_x + n_u + 1)
-        M = I_bar + A_bar * t  # + 0.5 * (t ** 2) * A_bar @ A_bar
-        # M = expm(A_bar * t)
-        Ad = M[0:n_x, 0:n_x]
-        Bd = M[0:n_x, n_x:n_x + n_u]
-        Gd = M[0:n_x, -1]
 
         Q = np.eye(n_x)
         np.fill_diagonal(Q, [10., 10., 2., 1., 1., 2., 1., 1., 1., 1., 1., 2.])
@@ -74,6 +40,8 @@ class Mpc:
         cost = 0
         constr = []
         for k in range(0, N):
+            Ak = Ad[k, :, :]
+            Bk = Bd[k, :, :]
             kf = 100 if k == N - 1 else 1  # terminal cost
             kuf = 0 if k == N - 1 else 1  # terminal cost
             z = x[k, 2]
@@ -94,14 +62,14 @@ class Mpc:
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
+                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
                            0 == fx,
                            0 == fy,
                            0 == fz]
             else:  # odd
                 u_ref[2] = m * g * 2
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
-                constr += [x[k + 1, :] == Ad @ x[k, :] + Bd @ u[k, :] + Gd,
+                constr += [x[k + 1, :] == Ak @ x[k, :] + Bk @ u[k, :] + Gk,
                            0 >= fx - mu * fz,
                            0 >= -fx - mu * fz,
                            0 >= fy - mu * fz,
