@@ -31,8 +31,8 @@ class Runner:
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 20  # mpc prediction horizon length (mpc steps)  # TODO: Modify
-        self.mpc_dt = 0.01  # mpc sampling time (s), needs to be a factor of N
+        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.mpc_dt = 0.02  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
         self.N_k = int(self.N * self.mpc_factor)  # total mpc prediction horizon length (low-level timesteps)
@@ -57,24 +57,24 @@ class Runner:
         if self.ctrl == "open":
             self.total_run = int(self.N * self.mpc_factor)
 
+        self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase  # TODO: don't forget this in application
+
     def run(self):
         total = self.total_run + 1  # number of timesteps to plot
-        t = 0  # time
-        t0 = t  # starting time
-
+        t = self.t_start  # time
+        t0 = 0
         mpc_factor = self.mpc_factor  # repeat mpc every x seconds
         mpc_counter = copy.copy(mpc_factor)
-        X_traj = np.zeros((total, self.n_X))
-        X_traj[0, :] = self.X_0  # initial conditions
+        X_traj = np.tile(self.X_0, (total, 1))  # initial conditions
         f_hist = np.zeros((total, self.n_U))
         s_hist = np.zeros(total)
         U = np.zeros(self.n_U)
-        j = int(self.mpc_factor)
-        # pf_ref = np.zeros((total, self.n_U))
-        # f_pred_hist = np.zeros((total, self.n_U))
-        # p_pred_hist = np.zeros((total, self.n_U))
+        j = self.mpc_factor
         x_ref, pf_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
         init = True
+        plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
+                              ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
+
         for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
@@ -99,8 +99,9 @@ class Runner:
                 if k == 0:
                     C = self.gait_map(self.N, self.mpc_dt, t, t0)
                     x_refk = x_ref
+                    pf_refk = pf_ref
                     x_in = convert(X_traj[k, :])  # convert to mpc states
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_cur, C=C, init=init)
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_refk, C=C, init=init)
                     for i in range(0, self.N):
                         f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
 
@@ -110,7 +111,7 @@ class Runner:
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
-                              ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref)
+                              ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
@@ -175,7 +176,7 @@ class Runner:
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
         amp = self.t_p/4  # amplitude
-        phi = np.pi*1  # np.pi*3/2  # phase offset
+        phi = np.pi*3/2  # np.pi*3/2  # phase offset
         x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phi) for i in range(t_ref)]
         # sit at the goal
         if t_sit != 0:
@@ -183,25 +184,24 @@ class Runner:
             x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp +
                                  amp * np.sin(2 * np.pi / period * (i * dt)) for i in range(t_sit)]
         # interpolate linear velocities
-        x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(self.total_run - 1)]
-        x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(self.total_run - 1)]
-        x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(self.total_run - 1)]
+        x_ref[:-1, 6:9] = [(x_ref[i + 1, 0:3] - x_ref[i, 0:3]) / dt for i in range(self.total_run - 1)]
 
-        C = self.gait_map(self.total_run, dt, 0, 0)  # low-level contact map for the entire run
+        C = self.gait_map(self.total_run, dt, self.t_start, 0)  # low-level contact map for the entire run
         idx_pf = find_peaks(-x_ref[:, 2])[0]  # indexes of footstep positions
-        idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
-        idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
-        n_pf = np.shape(idx_pf)[0]  # number of footstep positions
+        idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
+        # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
+        # idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
+        # n_pf = np.shape(idx_pf)[0]  # number of footstep positions
         pf_ref = np.zeros((self.total_run, 3))
-        j = int(period/dt)  # number of low-level timesteps in one gait cycle
-        for i in range(0, n_pf):
-            if int(i * j + j) > self.total_run:
-                jf = self.total_run - int(i * j)
-                pf_ref[int(i * j):int(i * j + jf), 0:2] = np.tile(x_ref[idx_pf[i], 0:2], (jf, 1))
-            else:
-                pf_ref[int(i * j):int(i * j + j), 0:2] = np.tile(x_ref[idx_pf[i], 0:2], (j, 1))
+        # j = int(period/dt)  # number of low-level timesteps in one gait cycle
+        kf = 0
+        for k in range(1, self.total_run):
+            if C[k-1] == 0 and C[k] == 1:
+                kf += 1
+            pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
 
         # np.set_printoptions(threshold=sys.maxsize)
+        # print(C)
         # print(pf_ref)
         return x_ref, pf_ref
 

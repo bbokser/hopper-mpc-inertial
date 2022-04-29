@@ -44,27 +44,25 @@ class Mpc:
         """
         N = self.N
         x_guess = np.zeros((N+1, self.n_x))
-        if init is True:  # TODO: if we init with tile, is that slower?
-            #  For the first MPC run, just repeat x0.
-            x_guess = np.tile(x_in, (N, 1))  # form initial guess
+        if init is True:
+            # x_guess = np.tile(x_in, (N, 1))  # For the first MPC run, just repeat x0.
+            x_guess[0, :] = x_in
+            x_guess[1:, :] = x_ref_in  # Use ref traj as initial guess?
+            # calculate better x_guess based on initial x_guess
+            self.gen_dt_dynamics(x_guess, pf)  # bad initial x
+            cost, constr = self.build_qp(x_in, x_ref_in, self.Ad, self.Bd, self.Gd, C)
+            self.solve_qp(cost, constr)
+            x_guess = self.x.value
         else:
             x_guess[0, :] = x_in
             x_guess[1:-1, :] = self.x.value[2:, :]  # time shift.
             x_guess[-1, :] = self.x.value[-1, :]  # copy last timestep as a dumb approx
 
-        # calculate better guess
-        self.gen_dt_dynamics(x_guess, pf)  # bad initial x (all x0)
-        cost, constr = self.build_qp(x_in, x_ref_in, self.Ad, self.Bd, self.Gd, C)
-        self.solve_qp(cost, constr)  # bad initial x
-        x_guess = self.x.value
-
         # calculate control based on x_guess
         self.gen_dt_dynamics(x_guess, pf)  # use new x as initial guess
         cost, constr = self.build_qp(x_in, x_ref_in, self.Ad, self.Bd, self.Gd, C)
-        self.solve_qp(cost, constr)  # bad initial x
+        self.solve_qp(cost, constr)
         u = self.u.value
-        # print(u)
-        # breakpoint()
         return u
 
     def gen_dt_dynamics(self, x, pf):
@@ -116,14 +114,14 @@ class Mpc:
             taux = u[k, 3]
             tauy = u[k, 4]
             tauz = u[k, 5]
-            '''
+
             constr += [taux <= 20,
                        taux >= -20,
                        tauy <= 20,
                        tauy >= -20,
                        tauz <= 4,
                        tauz >= -4]
-            '''
+
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
