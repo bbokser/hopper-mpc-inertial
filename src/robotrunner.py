@@ -89,7 +89,7 @@ class Runner:
             if self.ctrl == 'closed':
                 if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
                     mpc_counter = 0  # restart the mpc counter
-                    C = self.gait_map(t, t0)
+                    C = self.gait_map(self.N, self.mpc_dt, t, t0)
                     x_refk = self.path_plan_grab(x_ref=x_ref, k=k)  # TODO: Adaptive path planner
                     x_in = convert(X_traj[k, :])  # convert to mpc states
                     U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_cur, C=C, init=init)
@@ -102,11 +102,10 @@ class Runner:
                 if int(total/self.N) != mpc_factor:
                     print("ERROR: Incorrect settings", total/self.N, mpc_factor)
                 if k == 0:
-                    C = self.gait_map(t, t0)
+                    C = self.gait_map(self.N, self.mpc_dt, t, t0)
                     x_refk = x_ref
                     x_in = convert(X_traj[k, :])  # convert to mpc states
-                    rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, rf=rf, C=C)
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_cur, C=C, init=init)
                     for i in range(0, self.N):
                         f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
 
@@ -166,25 +165,24 @@ class Runner:
             s = 1  # scheduled stance
         return s
 
-    def gait_map(self, ts, t0):
+    def gait_map(self, N, dt, ts, t0):
         # generate vector of scheduled contact states over the mpc's prediction horizon
-        C = np.zeros(self.N)
-        for k in range(0, self.N):
+        C = np.zeros(N)
+        for k in range(0, N):
             C[k] = self.gait_scheduler(t=ts, t0=t0)
-            ts += self.mpc_dt
+            ts += dt
         return C
 
     def path_plan_init(self, x_in, xf):
-        # Path planner--generate reference trajectory in MPC state space!!!
+        # Path planner--generate low-level reference trajectory for the entire run
         dt = self.dt
         t_sit = int(0)  # timesteps spent "sitting" at goal
         t_ref = int(self.total_run - t_sit)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
-        amp = self.t_p/4  # 0.2  # 1.2
-        phase_offset = np.pi*1  # np.pi*3/2
-        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phase_offset)
-                       for i in range(0, np.shape(x_ref)[0])]
+        amp = self.t_p/4  # amplitude
+        phi = np.pi*1  # np.pi*3/2  # phase offset
+        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phi) for i in range(np.shape(x_ref)[0])]
         # interpolate linear velocities
         x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
@@ -192,13 +190,14 @@ class Runner:
         # sit at the goal
         if t_sit != 0:
             x_ref = np.vstack((x_ref, np.tile(xf, (t_sit, 1))))
-            x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp + amp * np.sin(2 * np.pi / period * (i * dt)) for i in
-                           range(0, t_sit)]
+            x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp +
+                                 amp * np.sin(2 * np.pi / period * (i * dt)) for i in range(t_sit)]
 
+        C = self.gait_map(self.total_run, dt, 0, 0)  # low-level contact map for the entire run
         k_pf = find_peaks(-x_ref[:, 2])
         pf_ref = np.zeros((np.shape(k_pf[0])[0]+1, 3))
         pf_ref[:-1, 0:2] = x_ref[k_pf[0], 0:2]  # planned footstep locations
-        pf_ref[-1, 0:2] = x_ref[-1, 0:2]  # just use last location as final footstep
+        pf_ref[-1, 0:2] = x_ref[-1, 0:2]  # use last location as final footstep
         return x_ref, pf_ref
 
     def path_plan_grab(self, x_ref, k):
@@ -214,4 +213,4 @@ class Runner:
             x_refk = x_ref[k:, :]
             x_refk = np.vstack((x_refk, np.tile(xf, (N_k - N_kleft, 1))))
 
-        return x_refk[::self.mpc_factor, :]
+        return x_refk[::self.mpc_factor, :]  # change to mpc-level timesteps
