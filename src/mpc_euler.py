@@ -78,7 +78,7 @@ class Mpc:
 
         for k in range(self.N):
             rz_phi = rz(x[k, 5])
-            rf = rz_phi @ (pf - x[k, 0:3])  # vector from body CoM to footstep location in body frame
+            rf = rz_phi @ (pf[k, :] - x[k, 0:3])  # vector from body CoM to footstep location in body frame
             rhat = hat(rz_phi.T @ (rh + rf))  # world frame vector from CoM to foot position
             J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
             A[3:6, 9:] = rz_phi
@@ -116,14 +116,14 @@ class Mpc:
             taux = u[k, 3]
             tauy = u[k, 4]
             tauz = u[k, 5]
-
+            '''
             constr += [taux <= 20,
                        taux >= -20,
                        tauy <= 20,
                        tauy >= -20,
                        tauz <= 4,
                        tauz >= -4]
-
+            '''
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)

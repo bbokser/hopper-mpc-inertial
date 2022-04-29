@@ -9,7 +9,7 @@ from utils import H, L, R, convert
 from tqdm import tqdm
 import numpy as np
 import copy
-import itertools
+import sys
 from scipy.signal import find_peaks
 
 np.set_printoptions(suppress=True, linewidth=np.nan)
@@ -31,8 +31,8 @@ class Runner:
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
-        self.mpc_dt = 0.02  # mpc sampling time (s), needs to be a factor of N
+        self.N = 20  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.mpc_dt = 0.01  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
         self.N_k = int(self.N * self.mpc_factor)  # total mpc prediction horizon length (low-level timesteps)
@@ -74,25 +74,20 @@ class Runner:
         # f_pred_hist = np.zeros((total, self.n_U))
         # p_pred_hist = np.zeros((total, self.n_U))
         x_ref, pf_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
-        s_prev = 0
-        i_pf = -1
-        pf_cur = pf_ref[0, :]  # current footstep location
         init = True
         for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
             s = self.gait_scheduler(t, t0)
-            if s == 1 and s_prev == 0:  # once it's contact time...
-                i_pf += 1  # go to next footstep location
-                pf_cur = pf_ref[i_pf, :]  # current footstep is updated
 
             if self.ctrl == 'closed':
                 if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
                     mpc_counter = 0  # restart the mpc counter
                     C = self.gait_map(self.N, self.mpc_dt, t, t0)
-                    x_refk = self.path_plan_grab(x_ref=x_ref, k=k)  # TODO: Adaptive path planner
+                    x_refk = self.path_plan_grab(x_ref=x_ref, k=k)
+                    pf_refk = self.path_plan_grab(x_ref=pf_ref, k=k)
                     x_in = convert(X_traj[k, :])  # convert to mpc states
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_cur, C=C, init=init)
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_refk, C=C, init=init)
                     init = False  # after the first mpc run, change init to false
 
                 mpc_counter += 1
@@ -110,7 +105,6 @@ class Runner:
                         f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
 
             s_hist[k] = s
-            s_prev = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
 
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
@@ -182,22 +176,33 @@ class Runner:
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
         amp = self.t_p/4  # amplitude
         phi = np.pi*1  # np.pi*3/2  # phase offset
-        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phi) for i in range(np.shape(x_ref)[0])]
-        # interpolate linear velocities
-        x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
-        x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
-        x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
+        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phi) for i in range(t_ref)]
         # sit at the goal
         if t_sit != 0:
             x_ref = np.vstack((x_ref, np.tile(xf, (t_sit, 1))))
             x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp +
                                  amp * np.sin(2 * np.pi / period * (i * dt)) for i in range(t_sit)]
+        # interpolate linear velocities
+        x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(self.total_run - 1)]
+        x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(self.total_run - 1)]
+        x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(self.total_run - 1)]
 
         C = self.gait_map(self.total_run, dt, 0, 0)  # low-level contact map for the entire run
-        k_pf = find_peaks(-x_ref[:, 2])
-        pf_ref = np.zeros((np.shape(k_pf[0])[0]+1, 3))
-        pf_ref[:-1, 0:2] = x_ref[k_pf[0], 0:2]  # planned footstep locations
-        pf_ref[-1, 0:2] = x_ref[-1, 0:2]  # use last location as final footstep
+        idx_pf = find_peaks(-x_ref[:, 2])[0]  # indexes of footstep positions
+        idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
+        idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
+        n_pf = np.shape(idx_pf)[0]  # number of footstep positions
+        pf_ref = np.zeros((self.total_run, 3))
+        j = int(period/dt)  # number of low-level timesteps in one gait cycle
+        for i in range(0, n_pf):
+            if int(i * j + j) > self.total_run:
+                jf = self.total_run - int(i * j)
+                pf_ref[int(i * j):int(i * j + jf), 0:2] = np.tile(x_ref[idx_pf[i], 0:2], (jf, 1))
+            else:
+                pf_ref[int(i * j):int(i * j + j), 0:2] = np.tile(x_ref[idx_pf[i], 0:2], (j, 1))
+
+        # np.set_printoptions(threshold=sys.maxsize)
+        # print(pf_ref)
         return x_ref, pf_ref
 
     def path_plan_grab(self, x_ref, k):
