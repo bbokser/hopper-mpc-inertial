@@ -4,7 +4,7 @@ Copyright (C) 2020-2022 Benjamin Bokser
 import plots
 import mpc_euler_cas
 import mpc_euler
-from utils import H, rz, hat, L, R, convert
+from utils import H, L, R, convert
 
 from tqdm import tqdm
 import numpy as np
@@ -37,18 +37,6 @@ class Runner:
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
         self.N_k = int(self.N * self.mpc_factor)  # total mpc prediction horizon length (low-level timesteps)
 
-        self.n_x = 12  # number of euler states
-        self.n_u = 6
-        self.A = np.zeros((self.n_x, self.n_x))
-        self.B = np.zeros((self.n_x, self.n_u))
-        self.G = np.zeros(self.n_x)
-        self.A[0:3, 6:9] = np.eye(3)
-        self.B[6:9, 0:3] = np.eye(3) / self.m
-        self.G[8] = -self.g
-        self.Ad = np.zeros((self.N, self.n_x, self.n_x))
-        self.Bd = np.zeros((self.N, self.n_x, self.n_u))
-        # self.Gd = np.zeros((self.N, self.n_x, 1))
-
         self.n_X = 13  # number of SE(3) states
         self.n_U = 6
         # simulator uses SE(3) states! (X)
@@ -64,7 +52,7 @@ class Runner:
         elif tool == 'casadi':
             mpc_tool = mpc_euler_cas
 
-        self.mpc = mpc_tool.Mpc(n_x=self.n_x, n_u=self.n_u, t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu)
+        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         if self.ctrl == "open":
             self.total_run = int(self.N * self.mpc_factor)
@@ -89,6 +77,7 @@ class Runner:
         s_prev = 0
         i_pf = -1
         pf_cur = pf_ref[0, :]  # current footstep location
+        init = True
         for k in tqdm(range(0, self.total_run)):
             t = t + self.dt
 
@@ -103,8 +92,8 @@ class Runner:
                     C = self.gait_map(t, t0)
                     x_refk = self.path_plan_grab(x_ref=x_ref, k=k)  # TODO: Adaptive path planner
                     x_in = convert(X_traj[k, :])  # convert to mpc states
-                    Ad, Bd, Gd = self.gen_dt_dynamics(x_refk, pf_cur)
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, Ad=Ad, Bd=Bd, Gk=Gd, C=C)
+                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_cur, C=C, init=init)
+                    init = False  # after the first mpc run, change init to false
 
                 mpc_counter += 1
                 f_hist[k, :] = U[0, :]  # * s  # take first timestep
@@ -119,7 +108,7 @@ class Runner:
                     rf = np.array([0, 0, -0.4])  # body frame foot position TODO: Needs to be legit in real setup
                     U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, rf=rf, C=C)
                     for i in range(0, self.N):
-                        f_hist[int(i*j):int(i*j+j), :] = list(itertools.repeat(U[i, :], j))
+                        f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
 
             s_hist[k] = s
             s_prev = s
@@ -196,18 +185,20 @@ class Runner:
         phase_offset = np.pi*1  # np.pi*3/2
         x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phase_offset)
                        for i in range(0, np.shape(x_ref)[0])]
-        k_pf = find_peaks(-x_ref[:, 2])
-        pf_ref = np.zeros((np.shape(k_pf[0])[0], 3))
-        pf_ref[:, 0:2] = x_ref[k_pf[0], 0:2]  # planned footstep locations
         # interpolate linear velocities
         x_ref[:-1, 6] = [(x_ref[i + 1, 0] - x_ref[i, 0]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 7] = [(x_ref[i + 1, 1] - x_ref[i, 1]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         x_ref[:-1, 8] = [(x_ref[i + 1, 2] - x_ref[i, 2]) / dt for i in range(0, np.shape(x_ref)[0] - 1)]
         # sit at the goal
         if t_sit != 0:
-            x_ref = np.vstack((x_ref, list(itertools.repeat(xf, t_sit))))
+            x_ref = np.vstack((x_ref, np.tile(xf, (t_sit, 1))))
             x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp + amp * np.sin(2 * np.pi / period * (i * dt)) for i in
                            range(0, t_sit)]
+
+        k_pf = find_peaks(-x_ref[:, 2])
+        pf_ref = np.zeros((np.shape(k_pf[0])[0]+1, 3))
+        pf_ref[:-1, 0:2] = x_ref[k_pf[0], 0:2]  # planned footstep locations
+        pf_ref[-1, 0:2] = x_ref[-1, 0:2]  # just use last location as final footstep
         return x_ref, pf_ref
 
     def path_plan_grab(self, x_ref, k):
@@ -218,37 +209,9 @@ class Runner:
         if N_k <= N_kleft:
             x_refk = x_ref[k:(k+N_k), :]
         elif N_kleft == 0:
-            x_refk = np.array(list(itertools.repeat(xf, int(N_k))))
+            x_refk = np.tile(xf, (N_k, 1))
         else:
             x_refk = x_ref[k:, :]
-            x_refk = np.vstack((x_refk, list(itertools.repeat(xf, int(N_k - N_kleft)))))
+            x_refk = np.vstack((x_refk, np.tile(xf, (N_k - N_kleft, 1))))
 
         return x_refk[::self.mpc_factor, :]
-
-    def gen_dt_dynamics(self, x, pf_cur):
-        # for every MPC horizon timestep, build CT A and B matrices and discretize them
-        dt = self.mpc_dt
-        rh = self.rh
-        Jinv = self.Jinv
-        n_x = self.n_x  # number of states
-        # n_u = self.n_u  # number of controls
-        A = self.A
-        B = self.B
-        G = self.G
-        Ad = self.Ad
-        Bd = self.Bd
-        for k in range(self.N):
-            rz_phi = rz(x[k, 5])
-            rf = rz_phi @ (pf_cur - x[k, 0:3])  # vector from body CoM to footstep location in body frame
-            rhat = hat(rz_phi.T @ (rh + rf))  # world frame vector from CoM to foot position
-            J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
-            A[3:6, 9:] = rz_phi
-            B[9:12, 0:3] = J_w_inv @ rhat
-            B[9:12, 3:] = J_w_inv @ rz_phi.T
-            # discretization
-            Ad[k, :, :] = np.eye(n_x) + A * dt  # forward euler for comp. speed
-            Bd[k, :, :] = B * dt
-
-        Gd = G * dt  # doesn't change, doesn't need updating per timestep
-
-        return Ad, Bd, Gd
