@@ -25,12 +25,12 @@ class Mpc:
         self.A[0:3, 6:9] = np.eye(3)
         self.B[6:9, 0:3] = np.eye(3) / self.m
         self.G[8] = -self.g
-        self.Gd = self.G * t  # doesn't change, doesn't need updating per timestep
         self.Ad = np.zeros((self.N, self.n_x, self.n_x))
         self.Bd = np.zeros((self.N, self.n_x, self.n_u))
-        # self.Gd = np.zeros((self.N, self.n_x, 1))
+        # self.Gd = np.zeros((self.n_x, 1))
+        self.Gd = self.G * t  # doesn't change, doesn't need updating per timestep
         self.Q = np.eye(self.n_x)
-        np.fill_diagonal(self.Q, [10., 10., 2., 1., 1., 2., 1., 1., 1., 1., 1., 2.])
+        np.fill_diagonal(self.Q, [5., 5., 2., 1., 1., 2., 1., 1., 1., 1., 1., 2.])
         self.R = np.eye(self.n_u)
         np.fill_diagonal(self.R, [0.001, 0.001, 0.001, 0.001, 0.001, 0.001])
         self.x = cp.Variable((N + 1, self.n_x))
@@ -71,18 +71,28 @@ class Mpc:
         rh = self.rh
         Jinv = self.Jinv
         n_x = self.n_x  # number of states
+        # n_u = self.n_u
         A = self.A
         B = self.B
-
+        # G = self.G
         for k in range(self.N):
             rz_phi = rz(x[k, 5])
-            rf = rz_phi @ (pf[k, :] - x[k, 0:3])  # vector from body CoM to footstep location in body frame
-            rhat = hat(rz_phi.T @ (rh + rf))  # world frame vector from CoM to foot position
+            rf = rh + rz_phi @ (pf[k, :] - x[k, 0:3])  # vector from body CoM to footstep location in body frame
+            rhat = hat(rz_phi.T @ rf)  # world frame vector from CoM to foot position
             J_w_inv = rz_phi @ Jinv @ rz_phi.T  # world frame Jinv
             A[3:6, 9:] = rz_phi
             B[9:12, 0:3] = J_w_inv @ rhat
             B[9:12, 3:] = J_w_inv @ rz_phi.T
             # discretization
+            '''
+            A_bar = np.hstack((A, B, G))
+            A_bar.resize((n_x + n_u + 1, n_x + n_u + 1))
+            I_bar = np.eye(n_x + n_u + 1)
+            M = I_bar + A_bar * dt + 0.5 * (dt ** 2) * A_bar @ A_bar
+            self.Ad[k, :, :] = M[0:n_x, 0:n_x]
+            self.Bd[k, :, :] = M[0:n_x, n_x:n_x + n_u]
+            self.Gd = M[0:n_x, -1]
+            '''
             self.Ad[k, :, :] = np.eye(n_x) + A * dt  # forward euler for comp. speed
             self.Bd[k, :, :] = B * dt
 
@@ -121,7 +131,7 @@ class Mpc:
                        tauy >= -20,
                        tauz <= 4,
                        tauz >= -4]
-
+            
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)

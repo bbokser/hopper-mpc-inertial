@@ -4,7 +4,7 @@ Copyright (C) 2020-2022 Benjamin Bokser
 import plots
 import mpc_euler_cas
 import mpc_euler
-from utils import H, L, R, convert
+from utils import H, L, R, convert, quat2rot
 
 from tqdm import tqdm
 import numpy as np
@@ -27,7 +27,9 @@ class Runner:
                            [70089.52, 45477183.53, -87045.58],
                            [2067970.36, -87045.58, 76287220.47]])*(10**(-9))  # g/mm2 to kg/m2
         self.Jinv = np.linalg.inv(self.J)
-        self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
+        # TODO: Check this, axes are likely wrong
+        # self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
+        self.rh = np.array([0., 0., 0.])  # mm to m
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
@@ -106,48 +108,55 @@ class Runner:
                         f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
 
             s_hist[k] = s
-            X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :])
+            X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :], pfk=pf_ref[k, :])
+            # if k >= 2359:
+            #     break
 
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
-        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
+        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
 
-    def dynamics_ct(self, X, U):
+    def dynamics_ct(self, X, U, pf):
         # SE(3) nonlinear dynamics
         # Unpack state vector
         m = self.m
         g = self.g
         J = self.J
+        rh = self.rh
         p = X[0:3]  # W frame
-        q = X[3:7]  # B to N
+        q = X[3:7]  # B to W
         v = X[7:10]  # B frame
         w = X[10:13]  # B frame
-        F = U[0:3]  # W frame
-        tau = U[3:]  # W frame
+        Fw = U[0:3]  # W frame
+        tau = U[3:]  # B frame
+
         Q = L(q) @ R(q).T
+        Fgw = np.array([0, 0, -g]) * m  # Gravitational force in world frame
+        Ftb = H.T @ Q.T @ H @ (Fgw + Fw)  # rotate Fgw + Fw from world frame to body frame
+        r = H.T @ Q.T @ H @ (pf - p)  # vec from CoM to step location in body frame
+        Fb = H.T @ Q.T @ H @ Fw  # rotate Fw from world frame to body frame
+        tautb = tau + np.cross(r, Fb)  # sum body frame rw torque with torque due to footstep vector and leg force
+
         dp = H.T @ Q @ H @ v  # rotate v from body to world frame
         dq = 0.5 * L(q) @ H @ w
-        Fgn = np.array([0, 0, -g]) * m  # Gravitational force in world frame
-        Fgb = H.T @ Q.T @ H @ Fgn  # rotate Fgn from world frame to body frame
-        Ft = F + Fgb  # total force in body frame
-        dv = 1 / m * Ft - np.cross(w, v)
-        dw = np.linalg.solve(J, tau - np.cross(w, J @ w))
+        dv = 1 / m * Ftb - np.cross(w, v)
+        dw = np.linalg.solve(J, tautb - np.cross(w, J @ w))
         dx = np.hstack((dp, dq, dv, dw)).T
         return dx
 
-    def rk4_normalized(self, xk, uk):
+    def rk4_normalized(self, xk, uk, pfk):
         # RK4 integrator solves for new X
         dynamics = self.dynamics_ct
         h = self.dt
-        f1 = dynamics(xk, uk)
-        f2 = dynamics(xk + 0.5 * h * f1, uk)
-        f3 = dynamics(xk + 0.5 * h * f2, uk)
-        f4 = dynamics(xk + h * f3, uk)
+        f1 = dynamics(xk, uk, pfk)
+        f2 = dynamics(xk + 0.5 * h * f1, uk, pfk)
+        f3 = dynamics(xk + 0.5 * h * f2, uk, pfk)
+        f4 = dynamics(xk + h * f3, uk, pfk)
         xn = xk + (h / 6.0) * (f1 + 2 * f2 + 2 * f3 + f4)
         xn[3:7] = xn[3:7] / np.linalg.norm(xn[3:7])  # normalize the quaternion term
         return xn
@@ -191,14 +200,18 @@ class Runner:
         idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
         # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
         # idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
-        # n_pf = np.shape(idx_pf)[0]  # number of footstep positions
+        # n_pf = np.shape(idx_pf)  # number of footstep positions
         pf_ref = np.zeros((self.total_run, 3))
         # j = int(period/dt)  # number of low-level timesteps in one gait cycle
         kf = 0
         for k in range(1, self.total_run):
             if C[k-1] == 0 and C[k] == 1:
                 kf += 1
-            pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
+
+            if kf >= np.shape(idx_pf)[0]:
+                pass
+            else:
+                pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
 
         # np.set_printoptions(threshold=sys.maxsize)
         # print(C)
