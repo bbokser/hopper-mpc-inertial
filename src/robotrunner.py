@@ -11,6 +11,7 @@ import numpy as np
 import copy
 import sys
 from scipy.signal import find_peaks
+from scipy.interpolate import CubicSpline
 
 np.set_printoptions(suppress=True, linewidth=np.nan)
 
@@ -33,6 +34,7 @@ class Runner:
         self.ctrl = ctrl
         self.dt = dt
         self.total_run = runtime
+        self.spline = True
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
@@ -196,6 +198,17 @@ class Runner:
         t_sit = int(0)  # timesteps spent "sitting" at goal
         t_ref = int(self.total_run - t_sit)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
+        if self.spline is True:
+            spline_t = np.array([0, t_ref*0.3, t_ref])
+            spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
+            csy = CubicSpline(spline_t, spline_y)
+            spline_psi = np.array([0, np.sin(45*np.pi/180) * 0.7, np.sin(45*np.pi/180)])
+            cspsi = CubicSpline(spline_t, spline_psi)
+            for k in range(t_ref):
+                x_ref[k, 1] = csy(k)  # create evenly spaced sample points of desired trajectory
+                x_ref[k, 5] = cspsi(k)  # create evenly spaced sample points of desired trajectory
+                # interpolate angular velocity
+            x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(self.total_run - 1)]
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
         amp = self.t_p/4  # amplitude
         phi = np.pi*3/2  # np.pi*3/2  # phase offset

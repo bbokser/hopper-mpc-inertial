@@ -140,9 +140,9 @@ class Mpc:
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
                            fz >= 0,
-                           fz <= m * g * 4,  # TODO: Calculate max vertical force
-                           z >= 0.1,
-                           z <= 3]
+                           fz <= m * g * 4]  #,  # TODO: Calculate max vertical force
+                           # z >= 0.1,
+                           # z <= 3]
 
         constr += [x[0, :] == x_in]  # initial condition
         # constr += [x[-1, :] == x_ref[-1, :]]  # final condition
