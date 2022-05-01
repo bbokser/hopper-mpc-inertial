@@ -4,7 +4,7 @@ Copyright (C) 2020-2022 Benjamin Bokser
 import plots
 import mpc_euler_cas
 import mpc_euler
-from utils import H, L, R, convert, quat2rot
+from utils import H, L, R, quat2euler
 
 from tqdm import tqdm
 import numpy as np
@@ -13,6 +13,18 @@ import sys
 from scipy.signal import find_peaks
 
 np.set_printoptions(suppress=True, linewidth=np.nan)
+
+
+def convert(X_in):
+    # convert from simulator states to mpc states (SE3 to euler)
+    x0 = np.zeros(12)
+    x0[0:3] = X_in[0:3]
+    q = X_in[3:7]
+    x0[3:6] = quat2euler(q)  # q -> euler
+    Q = L(q) @ R(q).T
+    x0[6:9] = H.T @ Q @ H @ X_in[7:10]  # body frame v -> world frame pdot
+    x0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
+    return x0
 
 
 class Runner:
@@ -45,7 +57,7 @@ class Runner:
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([2, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([1, 1, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -59,7 +71,8 @@ class Runner:
         if self.ctrl == "open":
             self.total_run = int(self.N * self.mpc_factor)
 
-        self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase  # TODO: don't forget this in application
+        # TODO: don't forget this in application
+        self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase
 
     def run(self):
         total = self.total_run + 1  # number of timesteps to plot
@@ -109,8 +122,8 @@ class Runner:
 
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :], pfk=pf_ref[k, :])
-            # if k >= 2359:
-            #     break
+            #if k >= 3059:
+            #    break
 
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
@@ -138,7 +151,7 @@ class Runner:
         Q = L(q) @ R(q).T
         Fgw = np.array([0, 0, -g]) * m  # Gravitational force in world frame
         Ftb = H.T @ Q.T @ H @ (Fgw + Fw)  # rotate Fgw + Fw from world frame to body frame
-        r = H.T @ Q.T @ H @ (pf - p)  # vec from CoM to step location in body frame
+        r = rh + H.T @ Q.T @ H @ (pf - p)  # vec from CoM to step location in body frame
         Fb = H.T @ Q.T @ H @ Fw  # rotate Fw from world frame to body frame
         tautb = tau + np.cross(r, Fb)  # sum body frame rw torque with torque due to footstep vector and leg force
 
@@ -199,7 +212,7 @@ class Runner:
         idx_pf = find_peaks(-x_ref[:, 2])[0]  # indexes of footstep positions
         idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
         # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
-        # idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
+        idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
         # n_pf = np.shape(idx_pf)  # number of footstep positions
         pf_ref = np.zeros((self.total_run, 3))
         # j = int(period/dt)  # number of low-level timesteps in one gait cycle

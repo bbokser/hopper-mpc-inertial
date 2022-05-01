@@ -30,7 +30,7 @@ class Mpc:
         # self.Gd = np.zeros((self.n_x, 1))
         self.Gd = self.G * t  # doesn't change, doesn't need updating per timestep
         self.Q = np.eye(self.n_x)
-        np.fill_diagonal(self.Q, [5., 5., 2., 1., 1., 2., 1., 1., 1., 1., 1., 2.])
+        np.fill_diagonal(self.Q, [5., 5., 2., 1., 1., 50., 1., 1., 1., 10., 10., 10.])
         self.R = np.eye(self.n_u)
         np.fill_diagonal(self.R, [0.001, 0.001, 0.001, 0.001, 0.001, 0.001])
         self.x = cp.Variable((N + 1, self.n_x))
@@ -42,6 +42,7 @@ class Mpc:
         Since we only have x0 when we run the mpc, we need to guess the rest of the xk over the mpc horizon.
         An easy way guess x is to use the x generated from the previous MPC run and time shift it.
         """
+        # print(x_ref_in[0, :] - x_in)
         N = self.N
         x_guess = np.zeros((N+1, self.n_x))
         if init is True:
@@ -84,15 +85,6 @@ class Mpc:
             B[9:12, 0:3] = J_w_inv @ rhat
             B[9:12, 3:] = J_w_inv @ rz_phi.T
             # discretization
-            '''
-            A_bar = np.hstack((A, B, G))
-            A_bar.resize((n_x + n_u + 1, n_x + n_u + 1))
-            I_bar = np.eye(n_x + n_u + 1)
-            M = I_bar + A_bar * dt + 0.5 * (dt ** 2) * A_bar @ A_bar
-            self.Ad[k, :, :] = M[0:n_x, 0:n_x]
-            self.Bd[k, :, :] = M[0:n_x, n_x:n_x + n_u]
-            self.Gd = M[0:n_x, -1]
-            '''
             self.Ad[k, :, :] = np.eye(n_x) + A * dt  # forward euler for comp. speed
             self.Bd[k, :, :] = B * dt
 
@@ -147,11 +139,10 @@ class Mpc:
                            0 >= -fx - mu * fz,
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
-                           fz >= 0] #,
-                           #fz <= m * g * 4,  # TODO: Calculate max vertical force
-                           #z >= 0.1]  # ,  # body frame fy = 0
-                           # np.array([0, 1, 0]) @ rz_phi @ x[k, 6:9].T == 0]  # body frame y velocity should be zero
-                           # z <= 3]
+                           fz >= 0,
+                           fz <= m * g * 4,  # TODO: Calculate max vertical force
+                           z >= 0.1,
+                           z <= 3]
 
         constr += [x[0, :] == x_in]  # initial condition
         # constr += [x[-1, :] == x_ref[-1, :]]  # final condition

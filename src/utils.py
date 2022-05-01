@@ -51,31 +51,14 @@ def rz(phi):
     return Rz
 
 
-def quat2z(Q):
-    # get ZYX Z-axis euler angle from quaternion
-    return np.arctan2(Q[:, 1] * Q[:, 3] - Q[:, 2] * Q[:, 0], -(Q[:, 2] * Q[:, 3] + Q[:, 1] * Q[:, 0]))
-
-
 def quat2euler(Q):
-    # ZYX Euler angles, not tait-bryan? Output roll-pitch-yaw order # this is why euler angles suck ass
-    zyx = transforms3d.euler.quat2euler(Q, axes='rzyx')  # Intro to Robotics, Mechanics and Control p. 44
+    # ZYX Euler angles. Output roll-pitch-yaw order # this is why euler angles suck ass
+    zyx = transforms3d.euler.quat2euler(Q, axes='rzyx')  # Intro to Robotics, Mechanics and Control 3rd ed. p. 44
     xyz = np.zeros(3)
     xyz[0] = zyx[2]
     xyz[1] = zyx[1]
     xyz[2] = zyx[0]
     return xyz
-
-
-def convert(X_in):
-    # convert from simulator states to mpc states (SE3 to euler)
-    x0 = np.zeros(12)
-    x0[0:3] = X_in[0:3]
-    q = X_in[3:7]
-    x0[3:6] = quat2euler(q)  # q -> euler
-    Q = L(q) @ R(q).T
-    x0[6:9] = H.T @ Q @ H @ X_in[7:10]  # v -> pdot
-    x0[9:] = H.T @ Q @ H @ X_in[10:13]  # body frame w -> world frame w
-    return x0
 
 
 def quat2rot(Q):
