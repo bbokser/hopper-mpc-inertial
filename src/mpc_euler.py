@@ -76,6 +76,7 @@ class Mpc:
         A = self.A
         B = self.B
         # G = self.G
+        print(np.shape(pf), np.shape(x))
         for k in range(self.N):
             rz_phi = rz(x[k, 5])
             rf = rh + rz_phi @ (pf[k, :] - x[k, 0:3])  # vector from body CoM to footstep location in body frame

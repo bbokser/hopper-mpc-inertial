@@ -29,11 +29,11 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, tool='cvxpy', dyn='euler', ctrl='closed', runtime=5000):
+    def __init__(self, dt=1e-3, tool='cvxpy', dyn='euler', ctrl='closed', t_run=5000):
         self.dyn = dyn
         self.ctrl = ctrl
         self.dt = dt
-        self.total_run = runtime
+        self.t_run = t_run
         self.spline = True
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
@@ -71,20 +71,20 @@ class Runner:
         self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         if self.ctrl == "open":
-            self.total_run = int(self.N * self.mpc_factor)
+            self.t_run = int(self.N * self.mpc_factor)
 
         # TODO: don't forget this in application
         self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase
 
     def run(self):
-        total = self.total_run + 1  # number of timesteps to plot
+        t_run = self.t_run + 1  # number of timesteps to plot
         t = self.t_start  # time
         t0 = 0
         mpc_factor = self.mpc_factor  # repeat mpc every x seconds
         mpc_counter = copy.copy(mpc_factor)
-        X_traj = np.tile(self.X_0, (total, 1))  # initial conditions
-        f_hist = np.zeros((total, self.n_U))
-        s_hist = np.zeros(total)
+        X_traj = np.tile(self.X_0, (t_run, 1))  # initial conditions
+        f_hist = np.zeros((t_run, self.n_U))
+        s_hist = np.zeros(t_run)
         U = np.zeros(self.n_U)
         j = self.mpc_factor
         x_ref, pf_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
@@ -92,7 +92,7 @@ class Runner:
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
 
-        for k in tqdm(range(0, self.total_run)):
+        for k in tqdm(range(0, self.t_run)):
             t = t + self.dt
 
             s = self.gait_scheduler(t, t0)
@@ -110,9 +110,9 @@ class Runner:
                 mpc_counter += 1
                 f_hist[k, :] = U[0, :]  # * s  # take first timestep
 
-            else:  # Open loop traj opt, this will fail if total != mpc_factor
-                if int(total/self.N) != mpc_factor:
-                    print("ERROR: Incorrect settings", total/self.N, mpc_factor)
+            else:  # Open loop traj opt, this will fail if t_run != mpc_factor
+                if int(t_run/self.N) != mpc_factor:
+                    print("ERROR: Incorrect settings", t_run/self.N, mpc_factor)
                 if k == 0:
                     C = self.gait_map(self.N, self.mpc_dt, t, t0)
                     x_refk = x_ref
@@ -131,7 +131,7 @@ class Runner:
         #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
-        plots.fplot(total, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        plots.fplot(t_run, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
 
         return None
@@ -194,67 +194,50 @@ class Runner:
 
     def path_plan_init(self, x_in, xf):
         # Path planner--generate low-level reference trajectory for the entire run
+        N_k = self.N_k  # total MPC horizon in low-level timesteps
+        t_run = self.t_run
         dt = self.dt
-        t_sit = int(0)  # timesteps spent "sitting" at goal
-        t_ref = int(self.total_run - t_sit)
-        x_ref = np.linspace(start=x_in, stop=xf, num=t_ref)  # interpolate positions
+        t_sit = 0  # timesteps spent "sitting" at goal
+        t_traj = int(t_run - t_sit)  # timesteps for trajectory not including sit time
+        t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
+        x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
         if self.spline is True:
-            spline_t = np.array([0, t_ref*0.3, t_ref])
+            spline_t = np.array([0, t_traj*0.3, t_traj])
             spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
             csy = CubicSpline(spline_t, spline_y)
             spline_psi = np.array([0, np.sin(45*np.pi/180) * 0.7, np.sin(45*np.pi/180)])
             cspsi = CubicSpline(spline_t, spline_psi)
-            for k in range(t_ref):
+            for k in range(t_traj):
                 x_ref[k, 1] = csy(k)  # create evenly spaced sample points of desired trajectory
                 x_ref[k, 5] = cspsi(k)  # create evenly spaced sample points of desired trajectory
                 # interpolate angular velocity
-            x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(self.total_run - 1)]
-        period = self.t_p  # *1.2  # * self.mpc_dt / 2
-        amp = self.t_p/4  # amplitude
-        phi = np.pi*3/2  # np.pi*3/2  # phase offset
-        x_ref[:, 2] = [x_in[2] + amp + amp*np.sin(2*np.pi/period*(i*dt)+phi) for i in range(t_ref)]
-        # sit at the goal
-        if t_sit != 0:
-            x_ref = np.vstack((x_ref, np.tile(xf, (t_sit, 1))))
-            x_ref[-t_sit:, 2] = [x_ref[-t_sit, 2] + amp +
-                                 amp * np.sin(2 * np.pi / period * (i * dt)) for i in range(t_sit)]
-        # interpolate linear velocities
-        x_ref[:-1, 6:9] = [(x_ref[i + 1, 0:3] - x_ref[i, 0:3]) / dt for i in range(self.total_run - 1)]
+            x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(t_run - 1)]
 
-        C = self.gait_map(self.total_run, dt, self.t_start, 0)  # low-level contact map for the entire run
+        x_ref = np.vstack((x_ref, np.tile(xf, (N_k + t_sit, 1))))  # sit at the goal
+        period = self.t_p  # *1.2  # * self.mpc_dt / 2
+        amp = self.t_p / 4  # amplitude
+        phi = np.pi * 3 / 2  # np.pi*3/2  # phase offset
+        # make height sine wave
+        x_ref[:, 2] = [x_in[2] + amp + amp * np.sin(2 * np.pi / period * (i * dt) + phi) for i in range(t_ref)]
+        # interpolate linear velocities
+        x_ref[:-1, 6:9] = [(x_ref[i + 1, 0:3] - x_ref[i, 0:3]) / dt for i in range(t_ref - 1)]
+
+        C = self.gait_map(t_ref, dt, self.t_start, 0)  # low-level contact map for the entire run
         idx_pf = find_peaks(-x_ref[:, 2])[0]  # indexes of footstep positions
         idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
         # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
-        idx_pf = np.hstack((idx_pf, self.total_run-1))  # add final footstep idx based on last timestep
-        # n_pf = np.shape(idx_pf)  # number of footstep positions
-        pf_ref = np.zeros((self.total_run, 3))
-        # j = int(period/dt)  # number of low-level timesteps in one gait cycle
+        idx_pf = np.hstack((idx_pf, t_ref-1))  # add final footstep idx based on last timestep
+        pf_ref = np.zeros((t_ref, 3))
         kf = 0
-        for k in range(1, self.total_run):
-            if C[k-1] == 0 and C[k] == 1:
+        n_idx = np.shape(idx_pf)[0]
+        for k in range(1, t_ref):
+            if C[k-1] == 0 and C[k] == 1 and kf < n_idx:
                 kf += 1
-
-            if kf >= np.shape(idx_pf)[0]:
-                pass
-            else:
-                pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
+            pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
 
         # np.set_printoptions(threshold=sys.maxsize)
-        # print(C)
-        # print(pf_ref)
         return x_ref, pf_ref
 
     def path_plan_grab(self, x_ref, k):
         # Grab appropriate timesteps of pre-planned trajectory for mpc
-        N_k = self.N_k  # length of MPC horizon in low-level ts
-        N_kleft = np.shape(x_ref[k:, :])[0]  # number of remaining timesteps in the plan
-        xf = x_ref[-1, :]
-        if N_k <= N_kleft:
-            x_refk = x_ref[k:(k+N_k), :]
-        elif N_kleft == 0:
-            x_refk = np.tile(xf, (N_k, 1))
-        else:
-            x_refk = x_ref[k:, :]
-            x_refk = np.vstack((x_refk, np.tile(xf, (N_k - N_kleft, 1))))
-
-        return x_refk[::self.mpc_factor, :]  # change to mpc-level timesteps
+        return x_ref[k:(k+self.N_k):self.mpc_factor, :]  # change to mpc-level timesteps

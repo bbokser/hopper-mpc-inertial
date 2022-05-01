@@ -24,5 +24,5 @@ args = parser.parse_args()
 
 dt = 1e-3
 
-runner = Runner(dt=dt, tool=args.tool, dyn=args.dyn, ctrl=args.ctrl, runtime=args.runtime)
+runner = Runner(dt=dt, tool=args.tool, dyn=args.dyn, ctrl=args.ctrl, t_run=args.runtime)
 runner.run()
