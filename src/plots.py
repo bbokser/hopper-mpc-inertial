@@ -11,6 +11,7 @@ from utils import quat2rot
 # plt.style.use(['science', 'no-latex'])
 # plt.rcParams['lines.linewidth'] = 2
 import matplotlib.ticker as plticker
+from celluloid import Camera
 
 plt.rcParams['font.size'] = 16
 

@@ -91,7 +91,7 @@ class Runner:
         init = True
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
-
+        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=x_ref[::mpc_factor, :])
         for k in tqdm(range(0, self.t_run)):
             t = t + self.dt
 
@@ -132,7 +132,7 @@ class Runner:
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.fplot(t_run, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
-        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
+        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::mpc_factor, :])
 
         return None
 
