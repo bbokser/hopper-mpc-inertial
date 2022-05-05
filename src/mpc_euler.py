@@ -17,6 +17,8 @@ class Mpc:
         self.mu = mu
         self.Jinv = Jinv
         self.rh = rh
+        self.f_max = np.array([352, 0, 206])  # max forces (actually change with leg pose, but assume const)
+        self.f_min = -self.f_max
         self.n_x = 12  # number of euler states
         self.n_u = 6
         self.A = np.zeros((self.n_x, self.n_x))
@@ -30,7 +32,7 @@ class Mpc:
         # self.Gd = np.zeros((self.n_x, 1))
         self.Gd = self.G * t  # doesn't change, doesn't need updating per timestep
         self.Q = np.eye(self.n_x)
-        np.fill_diagonal(self.Q, [5., 5., 2., 1., 1., 50., 1., 1., 1., 10., 10., 10.])
+        np.fill_diagonal(self.Q, [10., 10., 2., 1., 1., 50., 1., 1., 1., 10., 10., 10.])
         self.R = np.eye(self.n_u)
         np.fill_diagonal(self.R, [0.001, 0.001, 0.001, 0.001, 0.001, 0.001])
         self.x = cp.Variable((N + 1, self.n_x))
@@ -118,10 +120,10 @@ class Mpc:
             tauy = u[k, 4]
             tauz = u[k, 5]
 
-            constr += [taux <= 20,
-                       taux >= -20,
-                       tauy <= 20,
-                       tauy >= -20,
+            constr += [taux <= 7.78,
+                       taux >= -7.78,
+                       tauy <= 7.78,
+                       tauy >= -7.78,
                        tauz <= 4,
                        tauz >= -4]
             
@@ -141,7 +143,7 @@ class Mpc:
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
                            fz >= 0,
-                           fz <= m * g * 4]  #,  # TODO: Calculate max vertical force
+                           fz <= self.f_max[2]]  #,  # TODO: Calculate max vertical force
                            # z >= 0.1,
                            # z <= 3]
 

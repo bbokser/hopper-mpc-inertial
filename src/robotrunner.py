@@ -29,10 +29,10 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, tool='cvxpy', t_run=5000):
+    def __init__(self, dt=1e-3, tool='cvxpy', curve=False, t_run=5000):
         self.dt = dt
         self.t_run = t_run
-        self.spline = True
+        self.curve = curve
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
@@ -182,7 +182,7 @@ class Runner:
         t_traj = int(t_run - t_sit)  # timesteps for trajectory not including sit time
         t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
-        if self.spline is True:
+        if self.curve is True:
             spline_t = np.array([0, t_traj*0.3, t_traj])
             spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
             csy = CubicSpline(spline_t, spline_y)
