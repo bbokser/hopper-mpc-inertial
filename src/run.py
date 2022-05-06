@@ -6,8 +6,8 @@ import argparse
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument("tool", help="choose cvxpy or casadi",
-                    choices=['cvxpy', 'casadi'],
+parser.add_argument("dyn", help="choose 2f or 3f",
+                    choices=['2f', '3f'],
                     type=str)
 
 parser.add_argument("--curve", help="make the ref traj curved", action="store_true")
@@ -23,5 +23,5 @@ else:
 
 dt = 1e-3
 
-runner = Runner(dt=dt, tool=args.tool, curve=curve, t_run=args.runtime)
+runner = Runner(dt=dt, dyn=args.dyn, curve=curve, t_run=args.runtime)
 runner.run()

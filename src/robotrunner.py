@@ -2,8 +2,8 @@
 Copyright (C) 2020-2022 Benjamin Bokser
 """
 import plots
-import mpc_euler_cas
-import mpc_euler
+import mpc_cvx_euler_3f
+import mpc_cvx_euler_2f
 from utils import H, L, R, quat2euler
 
 from tqdm import tqdm
@@ -29,7 +29,7 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, tool='cvxpy', curve=False, t_run=5000):
+    def __init__(self, dt=1e-3, dyn='2f', curve=False, t_run=5000):
         self.dt = dt
         self.t_run = t_run
         self.curve = curve
@@ -60,13 +60,13 @@ class Runner:
         self.X_f = np.hstack([1, 1, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
-        mpc_tool = None
-        if tool == 'cvxpy':
-            mpc_tool = mpc_euler
-        elif tool == 'casadi':
-            mpc_tool = mpc_euler_cas
+        mpc_dyn = None
+        if dyn == '2f':
+            mpc_dyn = mpc_cvx_euler_2f
+        elif dyn == '3f':
+            mpc_dyn = mpc_cvx_euler_3f
 
-        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
+        self.mpc = mpc_dyn.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         # TODO: don't forget this in application
         self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase
@@ -105,7 +105,7 @@ class Runner:
             f_hist[k, :] = U[0, :]  # * s  # take first timestep
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :], pfk=pf_ref[k, :])
-            #if k >= 3059:
+            # if k >= 4879:
             #    break
 
         # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
@@ -183,13 +183,13 @@ class Runner:
         t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
         if self.curve is True:
-            spline_t = np.array([0, t_traj*0.3, t_traj])
-            spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
+            spline_t = np.array([0, t_traj*0.5, t_traj])
+            spline_y = np.array([x_in[1], xf[1] * 0.9, xf[1]])
             csy = CubicSpline(spline_t, spline_y)
-            spline_psi = np.array([0, np.sin(45*np.pi/180) * 0.7, np.sin(45*np.pi/180)])
+            spline_psi = np.array([0, -np.sin(45*np.pi/180) * 0.4, -np.sin(45*np.pi/180)])
             cspsi = CubicSpline(spline_t, spline_psi)
             for k in range(t_traj):
-                x_ref[k, 1] = csy(k)  # create evenly spaced sample points of desired trajectory
+                x_ref[k, 0] = csy(k)  # create evenly spaced sample points of desired trajectory
                 x_ref[k, 5] = cspsi(k)  # create evenly spaced sample points of desired trajectory
                 # interpolate angular velocity
             x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(t_run - 1)]
