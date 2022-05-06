@@ -55,7 +55,7 @@ Here is some example code:
 ```shell
 cd hopper-mpc-inertial/src
 source env/bin/activate
-python3.8 run.py cvxpy euler closed
+python3.8 run.py cvxpy
 ```
 This simulates the "robot". The output is a set of plots tracking the behavior over time.
 
