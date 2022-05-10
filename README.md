@@ -55,9 +55,11 @@ Here is some example code:
 ```shell
 cd hopper-mpc-inertial/src
 source env/bin/activate
-python3.8 run.py cvxpy
+python3.8 run.py 2f --runtime=2000
 ```
-This simulates the "robot". The output is a set of plots tracking the behavior over time.
+This simulates the "robot" for 2 seconds with the y-axis body frame output force constraint to zero. The output is a set of plots tracking the behavior over time.
 
-
-
+```
+python3.8 run.py 3f --curve
+```
+This simulates the "robot" for 5 seconds (the default) without the y-axis force constraint. The --curve argument adds curvature to the reference trajectory.
