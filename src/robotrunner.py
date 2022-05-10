@@ -29,12 +29,10 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, tool='cvxpy', dyn='euler', ctrl='closed', t_run=5000):
-        self.dyn = dyn
-        self.ctrl = ctrl
+    def __init__(self, dt=1e-3, tool='cvxpy', curve=False, t_run=5000):
         self.dt = dt
         self.t_run = t_run
-        self.spline = True
+        self.curve = curve
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
@@ -58,8 +56,8 @@ class Runner:
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
-        self.X_0 = np.array([0, 0, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([1, 1, 0.4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_0 = np.array([0, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
+        self.X_f = np.hstack([1, 1, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         mu = 1  # coeff of friction
 
         mpc_tool = None
@@ -69,9 +67,6 @@ class Runner:
             mpc_tool = mpc_euler_cas
 
         self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
-
-        if self.ctrl == "open":
-            self.t_run = int(self.N * self.mpc_factor)
 
         # TODO: don't forget this in application
         self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase
@@ -97,31 +92,17 @@ class Runner:
 
             s = self.gait_scheduler(t, t0)
 
-            if self.ctrl == 'closed':
-                if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
-                    mpc_counter = 0  # restart the mpc counter
-                    C = self.gait_map(self.N, self.mpc_dt, t, t0)
-                    x_refk = self.path_plan_grab(x_ref=x_ref, k=k)
-                    pf_refk = self.path_plan_grab(x_ref=pf_ref, k=k)
-                    x_in = convert(X_traj[k, :])  # convert to mpc states
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_refk, C=C, init=init)
-                    init = False  # after the first mpc run, change init to false
+            if mpc_counter == mpc_factor:  # check if it's time to restart the mpc
+                mpc_counter = 0  # restart the mpc counter
+                C = self.gait_map(self.N, self.mpc_dt, t, t0)
+                x_refk = self.path_plan_grab(x_ref=x_ref, k=k)
+                pf_refk = self.path_plan_grab(x_ref=pf_ref, k=k)
+                x_in = convert(X_traj[k, :])  # convert to mpc states
+                U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_refk, C=C, init=init)
+                init = False  # after the first mpc run, change init to false
 
-                mpc_counter += 1
-                f_hist[k, :] = U[0, :]  # * s  # take first timestep
-
-            else:  # Open loop traj opt, this will fail if t_run != mpc_factor
-                if int(t_run/self.N) != mpc_factor:
-                    print("ERROR: Incorrect settings", t_run/self.N, mpc_factor)
-                if k == 0:
-                    C = self.gait_map(self.N, self.mpc_dt, t, t0)
-                    x_refk = x_ref
-                    pf_refk = pf_ref
-                    x_in = convert(X_traj[k, :])  # convert to mpc states
-                    U = self.mpc.mpcontrol(x_in=x_in, x_ref_in=x_refk, pf=pf_refk, C=C, init=init)
-                    for i in range(0, self.N):
-                        f_hist[int(i*j):int(i*j+j), :] = np.tile(U[i, :], (j, 1))
-
+            mpc_counter += 1
+            f_hist[k, :] = U[0, :]  # * s  # take first timestep
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :], pfk=pf_ref[k, :])
             #if k >= 3059:
@@ -201,7 +182,7 @@ class Runner:
         t_traj = int(t_run - t_sit)  # timesteps for trajectory not including sit time
         t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
-        if self.spline is True:
+        if self.curve is True:
             spline_t = np.array([0, t_traj*0.3, t_traj])
             spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
             csy = CubicSpline(spline_t, spline_y)
