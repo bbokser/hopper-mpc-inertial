@@ -143,7 +143,7 @@ class Mpc:
                            0 >= fy - mu * fz,
                            0 >= -fy - mu * fz,
                            fz >= 0,
-                           fz <= self.f_max[2]]  #,  # TODO: Calculate max vertical force
+                           fz <= self.f_max[2]]  # TODO: f is in world frame here, f_max should be in world frame
                            # z >= 0.1,
                            # z <= 3]
 

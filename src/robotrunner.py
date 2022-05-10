@@ -2,8 +2,8 @@
 Copyright (C) 2020-2022 Benjamin Bokser
 """
 import plots
-import mpc_euler_cas
-import mpc_euler
+import mpc_cvx_euler_3f
+import mpc_cvx_euler_2f
 from utils import H, L, R, quat2euler
 
 from tqdm import tqdm
@@ -29,7 +29,7 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, tool='cvxpy', curve=False, t_run=5000):
+    def __init__(self, dt=1e-3, dyn='2f', curve=False, t_run=5000):
         self.dt = dt
         self.t_run = t_run
         self.curve = curve
@@ -37,7 +37,7 @@ class Runner:
         self.m = 7.5  # mass of the robot, kg
         self.J = np.array([[76148072.89, 70089.52, 2067970.36],
                            [70089.52, 45477183.53, -87045.58],
-                           [2067970.36, -87045.58, 76287220.47]])*(10**(-9))  # g/mm2 to kg/m2
+                           [2067970.36, -87045.58, 76287220.47]]) * (10 ** (-9))  # g/mm2 to kg/m2
         self.Jinv = np.linalg.inv(self.J)
         # TODO: Check this, axes are likely wrong
         # self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
@@ -57,19 +57,25 @@ class Runner:
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([1, 1, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([1, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        '''z = 45 * np.pi / 180
+        Q_z = np.array([np.cos(z/2), 0, 0, np.sin(z/2)]).T
+        Q_z = Q_z / np.linalg.norm(Q_z)
+        self.X_0[3:7] = Q_z
+        self.X_f[3:7] = Q_z'''
+
         mu = 1  # coeff of friction
 
-        mpc_tool = None
-        if tool == 'cvxpy':
-            mpc_tool = mpc_euler
-        elif tool == 'casadi':
-            mpc_tool = mpc_euler_cas
+        mpc_dyn = None
+        if dyn == '2f':
+            mpc_dyn = mpc_cvx_euler_2f
+        elif dyn == '3f':
+            mpc_dyn = mpc_cvx_euler_3f
 
-        self.mpc = mpc_tool.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
+        self.mpc = mpc_dyn.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         # TODO: don't forget this in application
-        self.t_start = 0.5*self.t_p*self.phi_switch  # start halfway through stance phase
+        self.t_start = 0.5 * self.t_p * self.phi_switch  # start halfway through stance phase
 
     def run(self):
         t_run = self.t_run + 1  # number of timesteps to plot
@@ -86,7 +92,7 @@ class Runner:
         init = True
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
-
+        # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=x_ref[::mpc_factor, :])
         for k in tqdm(range(0, self.t_run)):
             t = t + self.dt
 
@@ -105,15 +111,15 @@ class Runner:
             f_hist[k, :] = U[0, :]  # * s  # take first timestep
             s_hist[k] = s
             X_traj[k + 1, :] = self.rk4_normalized(xk=X_traj[k, :], uk=f_hist[k, :], pfk=pf_ref[k, :])
-            #if k >= 3059:
+            # if k >= 3579:
             #    break
 
-        # plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[:, 0:3],
-        #   p_pred_hist=p_pred_hist, f_pred_hist=f_pred_hist, pf_hist=pf_ref)
+        plots.posplot(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
+                      ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.fplot(t_run, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
-        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::50, :])
+        plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::mpc_factor, :])
 
         return None
 
@@ -183,13 +189,13 @@ class Runner:
         t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
         if self.curve is True:
-            spline_t = np.array([0, t_traj*0.3, t_traj])
-            spline_y = np.array([x_in[1], xf[1]*0.7, xf[1]])
+            spline_t = np.array([0, t_traj * 0.5, t_traj])
+            spline_y = np.array([x_in[1], xf[1] * 0.9, xf[1]])
             csy = CubicSpline(spline_t, spline_y)
-            spline_psi = np.array([0, np.sin(45*np.pi/180) * 0.7, np.sin(45*np.pi/180)])
+            spline_psi = np.array([0, -np.sin(45 * np.pi / 180) * 0.4, -np.sin(45 * np.pi / 180)])
             cspsi = CubicSpline(spline_t, spline_psi)
             for k in range(t_traj):
-                x_ref[k, 1] = csy(k)  # create evenly spaced sample points of desired trajectory
+                x_ref[k, 0] = csy(k)  # create evenly spaced sample points of desired trajectory
                 x_ref[k, 5] = cspsi(k)  # create evenly spaced sample points of desired trajectory
                 # interpolate angular velocity
             x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(t_run - 1)]
@@ -204,15 +210,15 @@ class Runner:
         x_ref[:-1, 6:9] = [(x_ref[i + 1, 0:3] - x_ref[i, 0:3]) / dt for i in range(t_ref - 1)]
 
         C = self.gait_map(t_ref, dt, self.t_start, 0)  # low-level contact map for the entire run
-        idx_pf = find_peaks(-x_ref[:, 2])[0]  # indexes of footstep positions
+        idx_pf = find_peaks(-x_ref[:, 2])[0] - 120  # indices of footstep positions
         idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
         # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
-        idx_pf = np.hstack((idx_pf, t_ref-1))  # add final footstep idx based on last timestep
+        idx_pf = np.hstack((idx_pf, t_ref - 1))  # add final footstep idx based on last timestep
         pf_ref = np.zeros((t_ref, 3))
         kf = 0
         n_idx = np.shape(idx_pf)[0]
         for k in range(1, t_ref):
-            if C[k-1] == 0 and C[k] == 1 and kf < n_idx:
+            if C[k - 1] == 1 and C[k] == 0 and kf < n_idx:
                 kf += 1
             pf_ref[k, 0:2] = x_ref[idx_pf[kf], 0:2]
 
@@ -221,4 +227,4 @@ class Runner:
 
     def path_plan_grab(self, x_ref, k):
         # Grab appropriate timesteps of pre-planned trajectory for mpc
-        return x_ref[k:(k+self.N_k):self.mpc_factor, :]  # change to mpc-level timesteps
+        return x_ref[k:(k + self.N_k):self.mpc_factor, :]  # change to mpc-level timesteps
