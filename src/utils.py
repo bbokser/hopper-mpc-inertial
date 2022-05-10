@@ -58,6 +58,7 @@ def quat2euler(Q):
     xyz[0] = zyx[2]
     xyz[1] = zyx[1]
     xyz[2] = zyx[0]
+    # xyz = transforms3d.euler.quat2euler(Q, axes='rxyz')  # Intro to Robotics, Mechanics and Control 3rd ed. p. 44
     return xyz
 
 

@@ -51,18 +51,39 @@ def fplot(total, p_hist, f_hist, s_hist):
     plt.show()
 
 
-def posplot(p_ref, p_hist, p_pred_hist, f_pred_hist, pf_hist):
+def set_axes_equal(ax: plt.Axes):
+    """
+    https://stackoverflow.com/questions/13685386/
+    matplotlib-equal-unit-length-with-equal-aspect-ratio-z-axis-is-not-equal-to
+    """
+    limits = np.array([
+        ax.get_xlim3d(),
+        ax.get_ylim3d(),
+        ax.get_zlim3d(),
+    ])
+    origin = np.mean(limits, axis=1)
+    radius = 0.5 * np.max(np.abs(limits[:, 1] - limits[:, 0]))
+    _set_axes_radius(ax, origin, radius)
+
+
+def _set_axes_radius(ax, origin, radius):
+    x, y, z = origin
+    ax.set_xlim3d([x - radius, x + radius])
+    ax.set_ylim3d([y - radius, y + radius])
+    ax.set_zlim3d([z - radius, z + radius])
+
+
+def posplot(p_ref, p_hist, ref_traj, pf_ref):
     ax = plt.axes(projection='3d')
-    ax.plot(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], color='red', label='Body Position')
-    ax.set_title('Body Position')
+    # ax.set_title('Body Position')
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)")
     ax.scatter(*p_hist[0, :], color='green', marker="x", s=200, label='Starting Position')
-    ax.quiver(p_pred_hist[:, 0], p_pred_hist[:, 1], p_pred_hist[:, 2],
-              -f_pred_hist[:, 0], -f_pred_hist[:, 1], -f_pred_hist[:, 2], label='Predicted Forces')
-    ax.scatter(pf_hist[:, 0], pf_hist[:, 1], pf_hist[:, 2], marker=".", s=200, color='blue', label='Footstep Positions')
     ax.scatter(*p_ref, marker="x", s=200, color='orange', label='Target Position')
+    ax.plot(p_hist[:, 0], p_hist[:, 1], p_hist[:, 2], color='r', label='CoM Position')
+    ax.plot(ref_traj[:, 0], ref_traj[:, 1], ref_traj[:, 2], ls='--', c='g', label='Reference Trajectory')
+    ax.scatter(pf_ref[:, 0], pf_ref[:, 1], pf_ref[:, 2], color='blue', label='Planned Footsteps')
     ax.legend()
     intervals = 2
     loc = plticker.MultipleLocator(base=intervals)
@@ -74,7 +95,9 @@ def posplot(p_ref, p_hist, p_pred_hist, f_pred_hist, pf_hist):
     ax.xaxis.labelpad = 30
     ax.yaxis.labelpad = 30
     ax.zaxis.labelpad = 30
-
+    ax.set_box_aspect([1, 1, 1])  # make aspect ratio equal for all axes
+    # ax.set_proj_type('ortho') # OPTIONAL - default is perspective (shown in image above)
+    set_axes_equal(ax)  # IMPORTANT - this is also required
     plt.show()
 
 
@@ -87,7 +110,7 @@ def animate_line(N, dataSet1, dataSet2, dataSet3, line, ref, pf, ax):
 
 def posplot_animate(p_ref, p_hist, ref_traj, pf_ref):
     fig = plt.figure()
-    ax = Axes3D(fig)  # ax = plt.axes(projection='3d')
+    ax = plt.axes(projection='3d')
     ax.set_title('Body Position')
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
@@ -130,8 +153,7 @@ def animate_cube(N, pt_hist, points):
 
 def posplot_animate_cube(p_ref, X_hist):
     fig = plt.figure()
-    ax = Axes3D(fig)
-    # ax = plt.axes(projection='3d')
+    ax = plt.axes(projection='3d')
     ax.set_title('Body Position')
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
