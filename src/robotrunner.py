@@ -39,9 +39,7 @@ class Runner:
                            [70089.52, 45477183.53, -87045.58],
                            [2067970.36, -87045.58, 76287220.47]]) * (10 ** (-9))  # g/mm2 to kg/m2
         self.Jinv = np.linalg.inv(self.J)
-        # TODO: Check this, axes are likely wrong
-        # self.rh = np.array([0.02201854, 6.80044366, 0.97499173]) / 1000  # mm to m
-        self.rh = np.array([0., 0., 0.])  # mm to m
+        self.rh = -np.array([0.02663114, 0.04435752, 6.61082088]) / 1000
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # 0.8 gait period, seconds
         self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
@@ -58,7 +56,9 @@ class Runner:
         # need to convert between these carefully. Pay attn to X vs x !!!
         self.X_0 = np.array([0, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
         self.X_f = np.hstack([1, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
-        '''z = 45 * np.pi / 180
+        '''
+        # rotates the initial body orientation 45 deg yaw
+        z = 45 * np.pi / 180
         Q_z = np.array([np.cos(z/2), 0, 0, np.sin(z/2)]).T
         Q_z = Q_z / np.linalg.norm(Q_z)
         self.X_0[3:7] = Q_z
@@ -74,7 +74,6 @@ class Runner:
 
         self.mpc = mpc_dyn.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
-        # TODO: don't forget this in application
         self.t_start = 0.5 * self.t_p * self.phi_switch  # start halfway through stance phase
 
     def run(self):
@@ -87,7 +86,6 @@ class Runner:
         f_hist = np.zeros((t_run, self.n_U))
         s_hist = np.zeros(t_run)
         U = np.zeros(self.n_U)
-        j = self.mpc_factor
         x_ref, pf_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
         init = True
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
