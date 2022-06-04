@@ -127,7 +127,7 @@ class Mpc:
                        tauz <= 4,
                        tauz >= -4]
             constr += [fy == 0]  # body frame y is always zero
-            
+            constr += [z >= 0.1]
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)

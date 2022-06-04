@@ -42,8 +42,8 @@ class Runner:
         self.rh = -np.array([0.02663114, 0.04435752, 6.61082088]) / 1000
         self.g = 9.807  # gravitational acceleration, m/s2
         self.t_p = 0.8  # 0.8 gait period, seconds
-        self.phi_switch = 0.5  # 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
-        self.N = 40  # mpc prediction horizon length (mpc steps)  # TODO: Modify
+        self.phi_switch = 0.5  # switching phase, must be between 0 and 1. Percentage of gait spent in contact.
+        self.N = 60  # mpc prediction horizon length (mpc steps)
         self.mpc_dt = 0.02  # mpc sampling time (s), needs to be a factor of N
         self.mpc_factor = int(self.mpc_dt / self.dt)  # mpc sampling time (timesteps), repeat mpc every x timesteps
         self.N_time = self.N * self.mpc_dt  # mpc horizon time
@@ -76,7 +76,7 @@ class Runner:
         self.mpc = mpc_dyn.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         self.t_start = 0.5 * self.t_p * self.phi_switch  # start halfway through stance phase
-        self.step_adjustment = -0  # adjusts step to be ahead/behind local minima of traj by traj timesteps
+        self.step_adjustment = -115  # adjusts step to be ahead/behind local minima of traj by traj timesteps
 
     def run(self):
         N_run = self.N_run + 1  # number of timesteps to plot
