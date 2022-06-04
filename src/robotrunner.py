@@ -29,9 +29,9 @@ def convert(X_in):
 
 
 class Runner:
-    def __init__(self, dt=1e-3, dyn='2f', curve=False, t_run=5000):
+    def __init__(self, dt=1e-3, dyn='2f', curve=False, N_run=5000):
         self.dt = dt
-        self.t_run = t_run
+        self.N_run = N_run
         self.curve = curve
         # self.tol = 1e-3  # desired mpc tolerance
         self.m = 7.5  # mass of the robot, kg
@@ -54,8 +54,9 @@ class Runner:
         # simulator uses SE(3) states! (X)
         # mpc uses euler-angle based states! (x)
         # need to convert between these carefully. Pay attn to X vs x !!!
+        self.dist = 0.4 * (N_run * dt)  # 1.2 make travel distance dependent on runtime
         self.X_0 = np.array([0, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])  # in rqvw form!!!
-        self.X_f = np.hstack([1, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
+        self.X_f = np.hstack([self.dist, 0, 0.27, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).T  # desired final state
         '''
         # rotates the initial body orientation 45 deg yaw
         z = 45 * np.pi / 180
@@ -75,23 +76,24 @@ class Runner:
         self.mpc = mpc_dyn.Mpc(t=self.mpc_dt, N=self.N, m=self.m, g=self.g, mu=mu, Jinv=self.Jinv, rh=self.rh)
 
         self.t_start = 0.5 * self.t_p * self.phi_switch  # start halfway through stance phase
+        self.step_adjustment = -0  # adjusts step to be ahead/behind local minima of traj by traj timesteps
 
     def run(self):
-        t_run = self.t_run + 1  # number of timesteps to plot
+        N_run = self.N_run + 1  # number of timesteps to plot
         t = self.t_start  # time
         t0 = 0
         mpc_factor = self.mpc_factor  # repeat mpc every x seconds
         mpc_counter = copy.copy(mpc_factor)
-        X_traj = np.tile(self.X_0, (t_run, 1))  # initial conditions
-        f_hist = np.zeros((t_run, self.n_U))
-        s_hist = np.zeros(t_run)
+        X_traj = np.tile(self.X_0, (N_run, 1))  # initial conditions
+        f_hist = np.zeros((N_run, self.n_U))
+        s_hist = np.zeros(N_run)
         U = np.zeros(self.n_U)
         x_ref, pf_ref = self.path_plan_init(x_in=convert(X_traj[0, :]), xf=convert(self.X_f))
         init = True
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         # plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=x_ref[::mpc_factor, :])
-        for k in tqdm(range(0, self.t_run)):
+        for k in tqdm(range(0, self.N_run)):
             t = t + self.dt
 
             s = self.gait_scheduler(t, t0)
@@ -116,7 +118,7 @@ class Runner:
                       ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
         plots.posplot_animate(p_ref=self.X_f[0:3], p_hist=X_traj[::mpc_factor, 0:3],
                               ref_traj=x_ref[::mpc_factor, 0:3], pf_ref=pf_ref[::mpc_factor, :])
-        plots.fplot(t_run, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
+        plots.fplot(N_run, p_hist=X_traj[:, 0:3], f_hist=f_hist, s_hist=s_hist)
         plots.posplot_animate_cube(p_ref=self.X_f[0:3], X_hist=X_traj[::mpc_factor, :])
 
         return None
@@ -180,11 +182,11 @@ class Runner:
     def path_plan_init(self, x_in, xf):
         # Path planner--generate low-level reference trajectory for the entire run
         N_k = self.N_k  # total MPC horizon in low-level timesteps
-        t_run = self.t_run
+        N_run = self.N_run
         dt = self.dt
         t_sit = 0  # timesteps spent "sitting" at goal
-        t_traj = int(t_run - t_sit)  # timesteps for trajectory not including sit time
-        t_ref = t_run + N_k  # timesteps for reference (extra for MPC)
+        t_traj = int(N_run - t_sit)  # timesteps for trajectory not including sit time
+        t_ref = N_run + N_k  # timesteps for reference (extra for MPC)
         x_ref = np.linspace(start=x_in, stop=xf, num=t_traj)  # interpolate positions
         if self.curve is True:
             spline_t = np.array([0, t_traj * 0.5, t_traj])
@@ -196,7 +198,7 @@ class Runner:
                 x_ref[k, 0] = csy(k)  # create evenly spaced sample points of desired trajectory
                 x_ref[k, 5] = cspsi(k)  # create evenly spaced sample points of desired trajectory
                 # interpolate angular velocity
-            x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(t_run - 1)]
+            x_ref[:-1, 11] = [(x_ref[i + 1, 11] - x_ref[i, 11]) / dt for i in range(N_run - 1)]
 
         x_ref = np.vstack((x_ref, np.tile(xf, (N_k + t_sit, 1))))  # sit at the goal
         period = self.t_p  # *1.2  # * self.mpc_dt / 2
@@ -208,7 +210,7 @@ class Runner:
         x_ref[:-1, 6:9] = [(x_ref[i + 1, 0:3] - x_ref[i, 0:3]) / dt for i in range(t_ref - 1)]
 
         C = self.gait_map(t_ref, dt, self.t_start, 0)  # low-level contact map for the entire run
-        idx_pf = find_peaks(-x_ref[:, 2])[0] - 120  # indices of footstep positions
+        idx_pf = find_peaks(-x_ref[:, 2])[0] + self.step_adjustment  # indices of footstep positions
         idx_pf = np.hstack((0, idx_pf))  # add initial footstep idx based on first timestep
         # idx_pf[0] = 0  # enforce first footstep idx to correspond to first timestep
         idx_pf = np.hstack((idx_pf, t_ref - 1))  # add final footstep idx based on last timestep
