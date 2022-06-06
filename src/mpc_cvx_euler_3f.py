@@ -126,7 +126,7 @@ class Mpc:
                        tauy >= -7.78,
                        tauz <= 4,
                        tauz >= -4]
-            constr += [z >= 0.1]
+            # constr += [z >= 0.1]
             if C[k] == 0:  # even
                 u_ref[2] = 0
                 cost += cp.quad_form(x[k + 1, :] - x_ref[k, :], Q * kf) + cp.quad_form(u[k, :] - u_ref, R * kuf)
